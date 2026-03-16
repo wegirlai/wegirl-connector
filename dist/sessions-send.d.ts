@@ -7,6 +7,9 @@ interface SessionsSendOptions {
     chatId: string;
     chatType: string;
     log?: any;
+    routingId?: string;
+    messageId?: string;
+    metadata?: any;
     taskId?: string;
     agentCount?: number;
     currentAgentId?: string;

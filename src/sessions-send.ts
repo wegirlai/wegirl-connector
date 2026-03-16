@@ -26,6 +26,9 @@ interface SessionsSendOptions {
   chatId: string;
   chatType: string;
   log?: any;
+  routingId?: string;     // 原始消息的路由ID（用于回复关联）
+  messageId?: string;     // 原始消息ID（用于回复关联）
+  metadata?: any;         // 原始消息的元数据（包含 feishuOpenId 等）
   // 群聊多 agent 任务参数
   taskId?: string;        // 多 agent 任务标识
   agentCount?: number;    // 总 agent 数
@@ -77,9 +80,9 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId } = options;
+  const { message, cfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId, routingId: originalRoutingId, messageId: originalMessageId, metadata: originalMetadata } = options;
 
-  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}`);
+  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
 
   // 获取 PluginRuntime
   const runtime = getWeGirlRuntime();
@@ -130,9 +133,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const agentId = route.agentId;
     log?.info?.(`[WeGirl SessionsSend] Route resolved: agentId=${agentId}, sessionKey=${sessionKey}, matchedBy=${route.matchedBy}`);
 
-    // 生成追踪ID和时间戳
-    const routingId = `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-    const messageId = `wegirl-${Date.now()}`;
+    // 使用原始消息的 routingId 和 messageId（如果提供），否则生成新的
+    const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+    const messageId = originalMessageId || `wegirl-${Date.now()}`;
     const createdAt = Date.now();
 
     // 2. 发送 Redis 消息（包含 sessionKey 和 agentId，用于监控）
@@ -156,6 +159,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         createdAt,
         expiresAt: createdAt + 3600000, // 1小时后过期
         metadata: {
+          ...originalMetadata, // 保留原始 metadata（包含 feishuOpenId 等）
           matchedBy: route.matchedBy,
           originalChannel: channel,
         },
@@ -217,68 +221,60 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           return;
         }
 
-        // ========== 群聊多 agent 聚合处理 ==========
+        // ========== 群聊多 agent 处理 ==========
+        // 每个 agent 完成时立即回复（不等待聚合）
         if (chatType === 'group' && taskId && agentCount && agentCount > 1) {
           const effectiveAgentId = currentAgentId || agentId;
-          log?.info?.(`[WeGirl SessionsSend] Group multi-agent task: taskId=${taskId}, agent=${effectiveAgentId}, progress=?/${agentCount}`);
+          log?.info?.(`[WeGirl SessionsSend] Group multi-agent reply: taskId=${taskId}, agent=${effectiveAgentId}`);
           
           try {
-            const redis = await getRedisPublisher(cfg);
-            if (!redis) {
-              log?.error?.(`[WeGirl SessionsSend] Redis not available for group aggregation`);
+            const pub = await getRedisPublisher(cfg);
+            if (!pub) {
+              log?.error?.(`[WeGirl SessionsSend] Redis publisher not connected`);
               return;
             }
-
-            // 1. 记录此 agent 的结果
-            await redis.hset(`wegirl:task:${taskId}:results`, effectiveAgentId, text);
-            await redis.hset(`wegirl:task:${taskId}:status`, effectiveAgentId, 'completed');
-            await redis.expire(`wegirl:task:${taskId}:results`, 3600); // 1小时过期
-            await redis.expire(`wegirl:task:${taskId}:status`, 3600);
-
-            // 2. 检查是否全部完成
-            const results = await redis.hgetall(`wegirl:task:${taskId}:results`);
-            const completedCount = Object.keys(results).length;
-            log?.info?.(`[WeGirl SessionsSend] Task progress: ${completedCount}/${agentCount} completed`);
-
-            if (completedCount === agentCount) {
-              // 3. 全部完成，聚合并统一回复
-              log?.info?.(`[WeGirl SessionsSend] All agents completed, aggregating results for task ${taskId}`);
-              
-              const aggregated = aggregateGroupResults(results, taskId);
-              
-              // 4. 发送聚合结果到群
-              const replyMessage = {
-                id: `wegirl-reply-${Date.now()}`,
-                type: 'message',
-                routingId: routingId,
-                inReplyTo: messageId,
-                content: aggregated,
-                to: chatId,
-                from: 'agent',
-                agentId: 'coordinator',
-                sessionId: sessionKey,
-                accountId: accountId,
-                status: 'completed',
-                isFinal: true,
-                replyType: 'text',
-                processedAt: Date.now(),
-                duration: Date.now() - createdAt,
-                taskId: taskId,
-                agentResults: results, // 包含各 agent 的原始结果
-                workflowId: undefined,
-                error: undefined,
-                timestamp: Date.now(),
-              };
-              await redis.publish('wegirl:replies', JSON.stringify(replyMessage));
-              log?.info?.(`[WeGirl SessionsSend] Aggregated reply published to wegirl:replies for task ${taskId}`);
-
-              // 5. 清理任务数据
-              await redis.del(`wegirl:task:${taskId}:results`, `wegirl:task:${taskId}:status`);
+            
+            // 分析回复内容确定状态
+            let replyStatus: string;
+            if (text.startsWith('NO_REPLY') || text.trim() === '') {
+              replyStatus = 'no_reply';  // Agent 选择不回复
+            } else if (text.startsWith('ERROR:') || text.includes('失败') || text.includes('错误')) {
+              replyStatus = 'error';  // 明确错误
+            } else if (text.includes('超时') || text.includes('timeout')) {
+              replyStatus = 'timeout';  // 超时
+            } else {
+              replyStatus = 'completed';  // 正常完成
             }
-            // 否则：等待其他 agent 完成，不回复
-            return;
+            
+            // 直接发送当前 agent 的回复（不聚合）
+            const replyId = `wegirl-reply-${Date.now()}`;
+            const replyMessage = {
+              id: replyId,
+              type: 'message',
+              routingId: routingId,
+              inReplyTo: messageId,
+              content: text,
+              to: chatId,
+              from: 'agent',
+              agentId: accountId, // 使用 accountId 标识发送者
+              sessionId: sessionKey,
+              accountId: accountId,
+              status: replyStatus,  // 根据分析设置状态
+              isFinal: true,
+              replyType: 'text',
+              processedAt: Date.now(),
+              duration: Date.now() - createdAt,
+              taskId: taskId,
+              workflowId: undefined,
+              error: replyStatus === 'error' || replyStatus === 'timeout' ? text : undefined,
+              timestamp: Date.now(),
+            };
+            await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
+            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${accountId}`);
+            
+            return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
-            log?.error?.(`[WeGirl SessionsSend] Group aggregation failed:`, err.message);
+            log?.error?.(`[WeGirl SessionsSend] Group reply failed:`, err.message);
           }
           return;
         }
@@ -307,7 +303,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             content: text,
             to: chatId,
             from: 'agent',
-            agentId: agentId,
+            agentId: accountId, // 使用 accountId（如 scout-notifier）而非 agentId（如 scout）
             sessionId: sessionKey,
             accountId: accountId,
             status: 'completed',
@@ -334,7 +330,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 content: '',
                 to: chatId,
                 from: 'agent',
-                agentId: agentId,
+                agentId: accountId, // 使用 accountId（如 scout-notifier）而非 agentId（如 scout）
                 sessionId: sessionKey,
                 accountId: accountId,
                 status: 'failed',

@@ -98,8 +98,8 @@ export const wegirlPlugin = {
         const db = account?.redisDb || cfg?.plugins?.entries?.wegirl?.config?.redisDb || 1;
         const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
         const consumerGroup = 'wegirl-consumers';
-        // 使用固定的 instanceId 作为 consumer 名称，避免重启后创建多个消费者
-        const consumerName = instanceId;
+        // 使用 accountId + instanceId 作为唯一 consumer 名称，避免多个 account 互相覆盖
+        const consumerName = `${id}:${instanceId}`;
 
         const redisOptions: any = { db };
         if (password) redisOptions.password = password;
@@ -110,6 +110,21 @@ export const wegirlPlugin = {
 
         streamClient.on('error', (err: Error) => log.error('[WeGirl] stream error:', err.message));
         publisher.on('error', (err: Error) => log.error('[WeGirl] publisher error:', err.message));
+
+        // 等待连接就绪
+        await Promise.all([
+          new Promise<void>((resolve, reject) => {
+            streamClient.once('ready', resolve);
+            streamClient.once('error', reject);
+            setTimeout(() => reject(new Error('streamClient connect timeout')), 10000);
+          }),
+          new Promise<void>((resolve, reject) => {
+            publisher.once('ready', resolve);
+            publisher.once('error', reject);
+            setTimeout(() => reject(new Error('publisher connect timeout')), 10000);
+          })
+        ]);
+        log.info('[WeGirl Channel] Redis connections ready');
 
         setWeGirlPublisher(publisher);
 
@@ -133,6 +148,11 @@ export const wegirlPlugin = {
               message: data.message, cfg,
               channel: data.channel, accountId: data.accountId,
               from: data.from, chatId: data.chatId, chatType: data.chatType, log,
+              // 传递原始 routingId 和 messageId，用于回复关联
+              routingId: data.routingId,
+              messageId: data.messageId,
+              // 传递原始 metadata（包含 feishuOpenId 等）
+              metadata: data.metadata,
               // 群聊多 agent 参数
               taskId: data.taskId,
               agentCount: data.agentCount,
@@ -144,8 +164,20 @@ export const wegirlPlugin = {
           }
         };
 
-        // Stream 消费循环
+        // Stream 消费循环 - 增强鲁棒性版本
         let running = true;
+        let consecutiveErrors = 0;
+        const MAX_CONSECUTIVE_ERRORS = 10;
+        const ERROR_RESET_INTERVAL = 60000; // 60秒后重置错误计数
+        
+        // 定时重置错误计数
+        const errorResetTimer = setInterval(() => {
+          if (consecutiveErrors > 0) {
+            consecutiveErrors = 0;
+            log.info('[WeGirl Channel] Error counter reset');
+          }
+        }, ERROR_RESET_INTERVAL);
+
         const consumeStream = async () => {
           while (running && !abortSignal.aborted) {
             try {
@@ -157,6 +189,9 @@ export const wegirlPlugin = {
                 'STREAMS', streamKey,
                 '>' // 只读取新消息（未分配给任何消费者的消息）
               ) as any;
+
+              // 成功读取，重置错误计数
+              consecutiveErrors = 0;
 
               if (!results || results.length === 0) {
                 // 没有消息时静默处理，不输出日志
@@ -175,7 +210,13 @@ export const wegirlPlugin = {
 
                     if (fieldMap.data) {
                       const data = JSON.parse(fieldMap.data);
-                      await handleMessage(data);
+                      // 添加超时控制，防止处理卡住
+                      await Promise.race([
+                        handleMessage(data),
+                        new Promise((_, reject) => 
+                          setTimeout(() => reject(new Error('Message handling timeout')), 60000)
+                        )
+                      ]);
                     }
 
                     // ACK 消息（确认已处理）
@@ -183,26 +224,73 @@ export const wegirlPlugin = {
                     log.debug(`[WeGirl Channel] Message ACKed: ${messageId}`);
                   } catch (err: any) {
                     log.error(`[WeGirl Channel] Failed to process message ${messageId}:`, err.message);
+                    // 处理失败也要 ACK，避免消息无限重试
+                    try {
+                      await streamClient.xack(streamKey, consumerGroup, messageId);
+                      log.debug(`[WeGirl Channel] Message ACKed after error: ${messageId}`);
+                    } catch (ackErr: any) {
+                      log.error(`[WeGirl Channel] Failed to ACK message ${messageId}:`, ackErr.message);
+                    }
                   }
                 }
               }
             } catch (err: any) {
-              if (err.message?.includes('Connection')) {
-                log.error('[WeGirl Channel] Redis connection error, retrying...');
-                await sleep(1000);
-              } else if (!running) {
+              consecutiveErrors++;
+              
+              if (err.message?.includes('Connection') || err.message?.includes('ECONNREFUSED')) {
+                log.error(`[WeGirl Channel] Redis connection error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), retrying in ${Math.min(consecutiveErrors * 2, 30)}s...`);
+                await sleep(Math.min(consecutiveErrors * 2000, 30000));
+              } else if (err.message?.includes('NOGROUP') || err.message?.includes('consumer group')) {
+                log.error('[WeGirl Channel] Consumer group error, attempting to recreate...');
+                try {
+                  await streamClient.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
+                  log.info('[WeGirl Channel] Consumer group recreated');
+                  consecutiveErrors = 0;
+                } catch (createErr: any) {
+                  log.error('[WeGirl Channel] Failed to recreate consumer group:', createErr.message);
+                  await sleep(5000);
+                }
+              } else if (!running || abortSignal.aborted) {
+                log.info('[WeGirl Channel] Stopping consumer loop');
                 break;
               } else {
-                log.error('[WeGirl Channel] Stream read error:', err.message);
+                log.error(`[WeGirl Channel] Stream read error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+                await sleep(Math.min(consecutiveErrors * 1000, 10000));
+              }
+
+              // 连续错误过多，主动退出让 Gateway 重启
+              if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                log.error(`[WeGirl Channel] Too many consecutive errors (${consecutiveErrors}), stopping consumer`);
+                running = false;
+                break;
               }
             }
           }
         };
 
-        // 启动消费
-        const consumePromise = consumeStream();
+        // 启动消费 - 带错误隔离
+        let consumeError: Error | null = null;
+        const consumePromise = consumeStream().catch(err => {
+          consumeError = err;
+          log.error('[WeGirl Channel] Consumer promise rejected:', err.message);
+        });
+        
         log.info(`[WeGirl Channel] Stream consumer started: ${streamKey}`);
         setStatus({ running: true });
+
+        // 健康检查定时器
+        const healthCheckTimer = setInterval(async () => {
+          try {
+            await publisher.ping();
+            // 检查 consumer 是否还在运行
+            if (!running || consumeError) {
+              log.error('[WeGirl Channel] Consumer not healthy, triggering restart');
+              clearInterval(healthCheckTimer);
+            }
+          } catch (err: any) {
+            log.error('[WeGirl Channel] Health check failed:', err.message);
+          }
+        }, 30000);
 
         // 等待终止信号
         await new Promise<void>((resolve) => {
@@ -219,6 +307,8 @@ export const wegirlPlugin = {
 
         // 清理
         running = false;
+        clearInterval(errorResetTimer);
+        clearInterval(healthCheckTimer);
         setWeGirlPublisher(null);
         try {
           await streamClient.quit();
