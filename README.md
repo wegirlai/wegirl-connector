@@ -1,51 +1,195 @@
-# WeGirl Connector v2.0
+# WeGirl Connector
 
-WeGirl 是 OpenClaw 的多 Agent 编排中枢插件，基于 Redis 实现跨实例 Agent 通信、能力匹配、任务调度和 Stream 监控。
+WeGirl 是 OpenClaw 的多 Agent 编排中枢插件，基于 Redis 实现跨实例 Agent 通信、任务调度和消息聚合。
 
-## 功能特性
+---
 
-- **Agent 管理**：注册、心跳、能力索引、在线状态
-- **智能路由**：直接寻址、能力匹配（least-load/round-robin/random）、广播
-- **跨实例通信**：基于 Redis Stream 的可靠消息传递（MAXLEN ~5000 自动清理）
-- **任务队列**：人类用户待办任务管理（创建、审批、完成）
-- **Stream 监控**：实时查看 Stream 状态、Consumer Group、Pending 消息
-- **CLI 工具**：完整的命令行管理工具
+## 📌 里程碑
 
-## 安装
+### Milestone 1: 基础架构 (v1.0)
 
-```bash
-# 克隆仓库
-git clone https://github.com/wegirlai/wegirl-connector.git
-cd wegirl-connector
+**核心功能**：
+- ✅ Agent 注册与心跳机制（30秒心跳，90秒超时）
+- ✅ 能力索引（capability indexing）
+- ✅ Redis Stream 跨实例通信
+- ✅ Consumer Group 消费组管理
+- ✅ 基础 CLI 工具
 
-# 安装依赖
-npm install
-
-# 编译 TypeScript
-npm run build
-
-# 链接 CLI 工具（可选）
-npm link
+**技术实现**：
+```
+Agent ──→ Redis (Hash: wegirl:agents:{id})
+           ├─ Stream: wegirl:stream:instance:{id}
+           ├─ Set: wegirl:capability:{cap}
+           └─ Consumer Group: wegirl-consumers
 ```
 
-## OpenClaw 配置
+**关键文件**：
+- `src/protocol.ts` - 消息协议定义
+- `src/registry.ts` - Agent 注册管理
+- `src/queue.ts` - 待办队列
 
-在 `openclaw.json` 中添加：
+---
+
+### Milestone 2: 消息派发重构 (v2.0)
+
+**问题**：原始实现直接调用 `runtime.sessionsSend`，但在 Gateway 启动时 runtime 不可用。
+
+**解决方案**：使用 `runtime.channel.reply.dispatchReplyFromConfig`
+
+**实现细节**：
+```typescript
+// 正确路由解析
+const route = runtime.channel.routing.resolveAgentRoute({
+  cfg, channel, accountId, peer: { kind: chatType, id: chatId }
+});
+
+// 构建消息信封
+const body = runtime.channel.reply.formatAgentEnvelope({...});
+const inboundCtx = runtime.channel.reply.finalizeInboundContext({...});
+
+// 派发消息
+await runtime.channel.reply.dispatchReplyFromConfig({
+  ctx: inboundCtx, cfg, dispatcher, replyOptions
+});
+```
+
+**新增功能**：
+- ✅ `wegirl:forward` - 请求消息通道（带 routingId/agentId/sessionKey）
+- ✅ `wegirl:replies` - 回复消息通道（带 duration/status/error）
+- ✅ 完整的消息字段（workflowId, error 预留字段）
+
+**关键提交**：`6f17fb2` - feat: 完善 wegirlSessionsSend 消息派发流程
+
+---
+
+### Milestone 3: 群聊多 Agent 聚合 (v2.1) ⭐ Current
+
+**需求场景**：
+```
+群里：@Scout @Analyst 分析这个网站
+      ├─ Scout: 抓取 URL
+      └─ Analyst: SEO 分析
+      
+期望：聚合两个 agent 的结果，统一回复到群里
+```
+
+**设计决策**：
+
+| 方案 | 优缺点 |
+|------|--------|
+| Coordinator Agent | 需要维护 coordinator，复杂度高 |
+| **wegirl 聚合** ✅ | 无需 coordinator，直接在 deliver 回调中聚合 |
+
+**实现机制**：
+
+```typescript
+// 调用时传入任务参数
+await wegirlSessionsSend({
+  message: "分析 example.com",
+  chatType: "group",        // 群聊触发
+  taskId: "task_xxx",       // 任务标识
+  agentCount: 2,            // 总共 2 个 agent
+  currentAgentId: "scout",  // 当前 agent
+});
+
+// deliver 回调中自动聚合
+deliver: async (payload, info) => {
+  if (chatType === "group" && taskId && agentCount > 1) {
+    // 1. 记录结果到 Redis
+    await redis.hset(`wegirl:task:${taskId}:results`, agentId, text);
+    
+    // 2. 检查是否全部完成
+    const results = await redis.hgetall(`wegirl:task:${taskId}:results`);
+    
+    // 3. 全部完成则聚合回复
+    if (Object.keys(results).length === agentCount) {
+      const aggregated = aggregateGroupResults(results);
+      await redis.publish("wegirl:replies", aggregated);
+    }
+  }
+}
+```
+
+**关键字段**：
+
+```typescript
+interface SessionsSendOptions {
+  // ...原有字段
+  taskId?: string;           // 多 agent 任务标识
+  agentCount?: number;       // 总 agent 数
+  currentAgentId?: string;   // 当前 agent 标识
+}
+```
+
+**测试验证**：
+```
+✅ 消息1: agent1 处理 → Task progress: 1/2 completed
+✅ 消息2: agent2 处理 → Task progress: 2/2 completed
+✅ 触发聚合: All agents completed, aggregating results
+✅ 统一回复: Aggregated reply published to wegirl:replies
+```
+
+**关键提交**：`3f041b9` - feat: 群聊多 agent 聚合功能
+
+---
+
+## 🏗️ 架构设计
+
+### 私聊 vs 群聊处理流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         消息进入                              │
+└──────────────────┬──────────────────────────────────────────┘
+                   │
+         ┌─────────▼─────────┐
+         │   chatType 判断    │
+         └─────────┬─────────┘
+                   │
+    ┌──────────────┼──────────────┐
+    ▼              ▼              ▼
+┌────────┐    ┌────────┐    ┌─────────────┐
+│ 私聊    │    │ 群单 agent│   │ 群多 agent   │
+│ (p2p)  │    │ @0或@1  │   │ @N (N>1)    │
+└────┬───┘    └────┬───┘    └──────┬──────┘
+     │             │               │
+     ▼             ▼               ▼
+标准单 agent     单 agent         Redis 记录
+session 路由    （带群上下文）     结果聚合
+                                 统一回复
+```
+
+### 消息流向
+
+```
+私聊:  User ──→ wegirlSessionSend ──→ Agent ──→ 回复 User
+
+群聊:  Group ──→ wegirlSessionSend ──┬─→ Agent1 ──┐
+                                    ├─→ Agent2 ──┼─→ 聚合 ──→ 回复群
+                                    └─→ AgentN ──┘
+```
+
+---
+
+## 🚀 快速开始
+
+### 安装
+
+```bash
+git clone https://github.com/wegirlai/wegirl-connector.git
+cd wegirl-connector
+npm install
+npm run build
+```
+
+### OpenClaw 配置
 
 ```json
 {
   "channels": {
     "wegirl": {
       "enabled": true,
-      "dmPolicy": "open",
-      "accounts": {
-        "default": {
-          "enabled": true,
-          "redisUrl": "redis://localhost:6379",
-          "redisPassword": "your-password",
-          "redisDb": 1
-        }
-      }
+      "dmPolicy": "open"
     }
   },
   "plugins": {
@@ -63,216 +207,81 @@ npm link
 }
 ```
 
-## CLI 工具
+---
 
-WeGirl 提供完整的 CLI 管理工具 `wegirl-cli`（23 个命令）：
+## 🛠️ CLI 工具
 
-### 系统状态
+### 基础命令
 
 ```bash
 # 健康检查
 wegirl-cli health
 
-# 连接测试
-wegirl-cli test
-
-# 系统统计（Redis 内存、Agent/Human/Task 数量）
-wegirl-cli stats
-```
-
-### Stream 监控
-
-```bash
-# 查看 Stream 完整状态
+# Stream 状态
 wegirl-cli stream.status --instanceId wegirl001
 
-# 查看所有 Consumers
-wegirl-cli stream.consumers --instanceId wegirl001
+# 发送消息（单 agent）
+wegirl-cli send --target agent:scout --message "分析这个网站"
 
-# 查看最新消息（--reverse 倒序，--count 指定数量）
-wegirl-cli stream.entries --instanceId wegirl001 --count 10 --reverse
-
-# 清空 Stream（危险操作，需 --force 确认）
-wegirl-cli stream.clear --instanceId wegirl001 --force
+# 发送消息（多 agent 群聊）
+wegirl-cli send \
+  --target agent:scout,agent:analyst \
+  --message "分析 example.com" \
+  --chatType group \
+  --chatId oc_xxx
 ```
 
-### Agent 管理
+### 完整 CLI 文档
 
-```bash
-# 列出所有 Agents 和 Humans
-wegirl-cli agents
+| 命令 | 说明 |
+|------|------|
+| `health` | 系统健康检查 |
+| `stats` | 系统统计（Agent/Human/Task 数量）|
+| `stream.status` | Stream 详细状态 |
+| `stream.entries` | 查看 Stream 消息 |
+| `agents` | 列出所有 Agent 和 Human |
+| `send` | 发送消息（支持单/多 agent）|
+| `task.create` | 创建任务 |
+| `task.list` | 列出任务 |
 
-# 按状态/能力筛选 Agents
-wegirl-cli agent.list --status online --capability url-discovery
+---
 
-# 获取单个 Agent 详情
-wegirl-cli agent.get --agentId scout
-```
+## 📊 Redis 数据结构
 
-### Human 管理
-
-```bash
-# 注册人类用户
-wegirl-cli human.register --userId tiger --name "Tiger" --capabilities "url-review,content-approval"
-
-# 注销人类用户
-wegirl-cli human.unregister --userId tiger
-```
-
-### 任务管理
-
-```bash
-# 创建任务
-wegirl-cli task.create --userId tiger --type url_review --title "审查 example.com" --description "详细描述" --priority high
-
-# 列出任务
-wegirl-cli task.list --userId tiger --status pending --limit 10
-
-# 获取任务详情
-wegirl-cli task.get --taskId task_xxx
-
-# 更新任务状态
-wegirl-cli task.update --taskId task_xxx --status approved
-
-# 审批任务（approve/reject）
-wegirl-cli task.decide --taskId task_xxx --decision approve --decisionBy tiger --message "同意"
-
-# 删除任务
-wegirl-cli task.delete --taskId task_xxx
-
-# 查看待办数量
-wegirl-cli pending --userId tiger
-```
-
-### 发送消息
-
-```bash
-# 发送给 Human（创建 Task）
-wegirl-cli send --target human:tiger --message "请审批" --from scout
-
-# 发送给 Agent（通过 Stream，支持跨实例）
-wegirl-cli send --target agent:scout --message "请分析 https://example.com/" --from tiger --channel feishu --accountId scout-notifier --chatId oc_xxx --chatType direct
-```
-
-### 其他查询
-
-```bash
-# 能力统计
-wegirl-cli capability.stats
-
-# 最近事件
-wegirl-cli event.recent --limit 10 --type agent_start
-
-# 事件统计
-wegirl-cli event.stats
-```
-
-## OpenClaw Tool 使用
-
-### wegirl_send - 发送消息
-
-```javascript
-// 发送给其他 Agent
-{
-  "tool": "wegirl_send",
-  "params": {
-    "target": "agent:scout",
-    "message": "请分析这个网站"
-  }
-}
-
-// 按能力匹配
-{
-  "tool": "wegirl_send",
-  "params": {
-    "target": "capability:url-discovery:least-load",
-    "message": "发现 URL"
-  }
-}
-
-// 发给人类用户
-{
-  "tool": "wegirl_send",
-  "params": {
-    "target": "human:tiger",
-    "message": "请审批这个申请"
-  }
-}
-
-// 广播
-{
-  "tool": "wegirl_send",
-  "params": {
-    "target": "broadcast",
-    "message": "系统维护通知"
-  }
-}
-```
-
-### Target 格式
-
-| 格式 | 示例 | 说明 |
-|------|------|------|
-| `agent:id` | `agent:scout` | 直接发给指定 Agent |
-| `human:id` | `human:tiger` | 发给指定人类用户（创建 Task）|
-| `capability:name:strategy` | `capability:code:least-load` | 按能力匹配，策略：least-load/round-robin/random |
-| `broadcast` | `broadcast` | 广播给所有在线 Agent |
-
-## Redis 数据结构
-
-| Key | 类型 | 说明 |
+| Key | 类型 | 用途 |
 |-----|------|------|
-| `wegirl:agents:{agentId}` | Hash | Agent 信息（状态、能力、心跳等）|
-| `wegirl:humans:{userId}` | Hash | 人类用户信息 |
-| `wegirl:capability:{cap}` | Set | 拥有该能力的 Agent 集合 |
-| `wegirl:task:{taskId}` | Hash | 任务详情 |
-| `wegirl:tasks:{userId}:by_status` | ZSet | 用户任务按状态索引 |
-| `wegirl:stream:instance:{id}` | Stream | 跨实例消息流（MAXLEN ~5000）|
+| `wegirl:agents:{id}` | Hash | Agent 信息 |
+| `wegirl:humans:{id}` | Hash | 人类用户信息 |
+| `wegirl:capability:{cap}` | Set | 能力索引 |
+| `wegirl:stream:instance:{id}` | Stream | 跨实例消息流 |
+| `wegirl:task:{id}:results` | Hash | 多 agent 任务结果（临时）|
+| `wegirl:forward` | Pub/Sub | 请求消息通道 |
+| `wegirl:replies` | Pub/Sub | 回复消息通道 |
 
-## 消息流向
+---
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Agent A   │────►│  Redis      │────►│   Agent B   │
-│ (Instance 1)│     │  Stream     │     │ (Instance 2)│
-└─────────────┘     └─────────────┘     └─────────────┘
-                            │
-                            ▼
-                    ┌─────────────┐
-                    │ Consumer    │
-                    │ Group       │
-                    │ (wegirl-   │
-                    │ consumers)  │
-                    └─────────────┘
-```
-
-## 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `REDIS_URL` | Redis 连接地址 | `redis://localhost:6379` |
-| `REDIS_PASSWORD` | Redis 密码 | - |
-| `REDIS_DB` | Redis 数据库 | `1` |
-| `OPENCLAW_INSTANCE_ID` | 实例 ID | `instance-local` |
-
-## 开发
+## 🔧 开发
 
 ```bash
-# 开发模式（自动编译）
+# 开发模式
 npm run dev
-
-# 运行测试
-npm test
 
 # 构建
 npm run build
+
+# 运行测试
+npm test
 ```
 
-## 许可证
+---
+
+## 📜 许可证
 
 MIT
 
-## 相关项目
+---
+
+## 🔗 相关项目
 
 - [OpenClaw](https://github.com/openclaw/openclaw) - AI Agent 运行时
 - [ClawHub](https://clawhub.com) - Agent 技能市场
