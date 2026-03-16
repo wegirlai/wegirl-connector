@@ -88,14 +88,6 @@ export const wegirlPlugin = {
           || process.env.OPENCLAW_INSTANCE_ID
           || 'instance-local';
 
-        // ========== 强制日志 ==========
-        console.log('[WeGirl Channel] ========================================');
-        console.log('[WeGirl Channel] START ACCOUNT CALLED!');
-        console.log('[WeGirl Channel] accountId:', id);
-        console.log('[WeGirl Channel] instanceId:', instanceId);
-        console.log('[WeGirl Channel] ========================================');
-        // ========== 强制日志 ==========
-
         log.info(`[WeGirl Channel] Starting: ${id} (instance: ${instanceId})`);
 
         const redisUrl = account?.redisUrl || 'redis://localhost:6379';
@@ -106,7 +98,8 @@ export const wegirlPlugin = {
         const db = account?.redisDb || cfg?.plugins?.entries?.wegirl?.config?.redisDb || 1;
         const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
         const consumerGroup = 'wegirl-consumers';
-        const consumerName = `${instanceId}-${Date.now()}`;
+        // 使用固定的 instanceId 作为 consumer 名称，避免重启后创建多个消费者
+        const consumerName = instanceId;
 
         const redisOptions: any = { db };
         if (password) redisOptions.password = password;
@@ -161,7 +154,10 @@ export const wegirlPlugin = {
                 '>' // 只读取新消息（未分配给任何消费者的消息）
               ) as any;
 
-              if (!results || results.length === 0) continue;
+              if (!results || results.length === 0) {
+                // 没有消息时静默处理，不输出日志
+                continue;
+              }
 
               // 解析结果: [[streamKey, [[id, [field, value, ...]], ...]]]
               for (const [, messages] of results) {

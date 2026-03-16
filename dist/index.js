@@ -27,6 +27,11 @@ const plugin = {
         if (context.runtime) {
             setWeGirlRuntime(context.runtime);
             logger.info('[WeGirl] Runtime saved to global');
+            logger.info(`[WeGirl] Runtime type: ${typeof context.runtime}`);
+            logger.info(`[WeGirl] Runtime methods: ${Object.keys(context.runtime).join(', ')}`);
+        }
+        else {
+            logger.error('[WeGirl] No runtime in context!');
         }
         // 初始化 Redis 连接
         async function initRedis() {
