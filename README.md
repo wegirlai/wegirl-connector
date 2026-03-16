@@ -133,6 +133,70 @@ interface SessionsSendOptions {
 
 ---
 
+## 🔄 通信模式
+
+### Agent → Agent (A2A)
+
+Agent 之间的直接通信，无需人类介入。
+
+**典型场景**：
+```
+Quartermaster: "@Scout 发现 example.com 的所有 URL"
+     ↓
+Scout: 完成爬取 → 回复 URL 列表
+     ↓
+Quartermaster: "@Harvester 抓取这些内容"
+     ↓
+Harvester: 完成抓取 → 回复内容片段
+```
+
+**特点**：
+- 实时、同步通信
+- 可跨实例（通过 Redis Stream）
+- 支持能力匹配路由（`capability:url-discovery:least-load`）
+- 消息包含完整上下文（routingId, sessionKey, agentId）
+
+**消息通道**：
+- 请求：`wegirl:forward` → Redis Stream → Agent
+- 回复：Agent → `wegirl:replies` Pub/Sub → 调用方
+
+---
+
+### Agent → Human (A2H)
+
+Agent 向人类用户发起任务或请求审批。
+
+**典型场景**：
+```
+Scout: "发现 50 个 URL，请审批哪些需要抓取"
+     ↓
+Human (tiger): 查看任务 → 审批 "approve all"
+     ↓
+Scout: 收到审批结果 → 继续执行
+```
+
+**特点**：
+- 异步、非阻塞
+- 用户离线时任务进入待办队列（`wegirl:pending:{userId}`）
+- 支持优先级、过期时间、审批流程
+- 用户上线时通过通知推送
+
+**消息通道**：
+- 创建任务：Agent → Redis Hash (`wegirl:task:{id}`) + ZSet 索引
+- 状态更新：Human → `wegirl:task:decision` → Agent 监听
+- 待办通知：Cron/Heartbeat 检查 → 推送给在线用户
+
+**与 A2A 的区别**：
+
+| 维度 | A2A (Agent→Agent) | A2H (Agent→Human) |
+|------|-------------------|-------------------|
+| 响应时间 | 秒级（实时） | 分钟/小时级（异步） |
+| 可靠性 | 即发即走 | 持久化 + 待办队列 |
+| 交互方式 | 一问一答 | 审批/选择/评论 |
+| 失败处理 | 重试/降级 | 任务挂起 + 提醒 |
+
+---
+
 ## 🏗️ 架构设计
 
 ### 私聊 vs 群聊处理流程
@@ -211,7 +275,58 @@ npm run build
 
 ## 🛠️ CLI 工具
 
-### 基础命令
+### Agent → Agent (A2A)
+
+```bash
+# 直接发给指定 Agent
+wegirl-cli send --target agent:scout --message "分析 https://example.com"
+
+# 按能力匹配（自动选择负载最低的 Agent）
+wegirl-cli send --target "capability:url-discovery:least-load" --message "发现 URL"
+
+# 广播给所有在线 Agent
+wegirl-cli send --target broadcast --message "系统维护通知"
+
+# 多 Agent 群聊（聚合回复）
+wegirl-cli send \
+  --target agent:scout,agent:analyst \
+  --message "分析 example.com" \
+  --chatType group \
+  --chatId oc_xxx
+```
+
+### Agent → Human (A2H)
+
+```bash
+# 创建任务（人类审批型）
+wegirl-cli task.create \
+  --userId tiger \
+  --type url_review \
+  --title "审批 example.com 的 URL" \
+  --description "发现 50 个 URL，请审批" \
+  --priority high
+
+# 查看某人的待办
+wegirl-cli pending --userId tiger
+
+# 列出某人的任务
+wegirl-cli task.list --userId tiger --status pending
+
+# 审批任务
+wegirl-cli task.decide \
+  --taskId task_xxx \
+  --decision approve \
+  --decisionBy tiger \
+  --message "全部通过"
+
+# 注册人类用户（带能力标签）
+wegirl-cli human.register \
+  --userId tiger \
+  --name "Tiger" \
+  --capabilities "url-review,content-approval"
+```
+
+### 监控与调试
 
 ```bash
 # 健康检查
@@ -233,30 +348,62 @@ wegirl-cli send \
 
 ### 完整 CLI 文档
 
-| 命令 | 说明 |
-|------|------|
-| `health` | 系统健康检查 |
-| `stats` | 系统统计（Agent/Human/Task 数量）|
-| `stream.status` | Stream 详细状态 |
-| `stream.entries` | 查看 Stream 消息 |
-| `agents` | 列出所有 Agent 和 Human |
-| `send` | 发送消息（支持单/多 agent）|
-| `task.create` | 创建任务 |
-| `task.list` | 列出任务 |
+| 命令 | 类型 | 说明 |
+|------|------|------|
+| `send` | A2A | 发送消息给 Agent（支持单/多/广播/能力匹配）|
+| `task.create` | A2H | 创建人类任务 |
+| `task.list` | A2H | 列出任务 |
+| `task.decide` | A2H | 审批任务 |
+| `pending` | A2H | 查看待办数量 |
+| `human.register` | A2H | 注册人类用户 |
+| `health` | 系统 | 健康检查 |
+| `stats` | 系统 | 系统统计（Agent/Human/Task）|
+| `stream.status` | 系统 | Stream 详细状态 |
+| `agents` | 系统 | 列出所有 Agent 和 Human |
 
 ---
 
 ## 📊 Redis 数据结构
 
+### A2A (Agent → Agent)
+
 | Key | 类型 | 用途 |
 |-----|------|------|
-| `wegirl:agents:{id}` | Hash | Agent 信息 |
-| `wegirl:humans:{id}` | Hash | 人类用户信息 |
-| `wegirl:capability:{cap}` | Set | 能力索引 |
-| `wegirl:stream:instance:{id}` | Stream | 跨实例消息流 |
-| `wegirl:task:{id}:results` | Hash | 多 agent 任务结果（临时）|
-| `wegirl:forward` | Pub/Sub | 请求消息通道 |
-| `wegirl:replies` | Pub/Sub | 回复消息通道 |
+| `wegirl:agents:{id}` | Hash | Agent 注册信息（状态、能力、心跳）|
+| `wegirl:capability:{cap}` | Set | 能力索引（拥有某能力的 Agent 集合）|
+| `wegirl:stream:instance:{id}` | Stream | 跨实例消息流（MAXLEN ~5000）|
+| `wegirl:forward` | Pub/Sub | A2A 请求消息广播 |
+| `wegirl:replies` | Pub/Sub | A2A 回复消息广播 |
+| `wegirl:task:{id}:results` | Hash | 多 agent 任务结果（临时，1h TTL）|
+
+### A2H (Agent → Human)
+
+| Key | 类型 | 用途 |
+|-----|------|------|
+| `wegirl:humans:{id}` | Hash | 人类用户信息（能力、偏好、在线状态）|
+| `wegirl:task:{id}` | Hash | 任务详情（类型、状态、审批信息）|
+| `wegirl:tasks:{userId}:by_status` | ZSet | 用户任务按状态索引（score=时间戳）|
+| `wegirl:pending:{userId}` | ZSet | 待办队列（按优先级+时间排序）|
+
+### 数据流向图
+
+```
+A2A:
+  Agent A ──→ wegirl:forward (Pub/Sub)
+                 ↓
+            wegirl:stream (Stream)
+                 ↓
+  Agent B ←─── wegirl:replies (Pub/Sub)
+
+A2H:
+  Agent ──→ wegirl:task:{id} (Hash)
+              + wegirl:tasks:{userId}:by_status (ZSet)
+              + wegirl:pending:{userId} (ZSet)
+                 ↓
+  Human ◄─── 待办通知（Heartbeat/Cron）
+                 ↓
+  Human ──→ wegirl:task:decision (Pub/Sub) ──→ Agent
+```
 
 ---
 
