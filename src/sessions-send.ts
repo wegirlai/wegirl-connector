@@ -26,6 +26,10 @@ interface SessionsSendOptions {
   chatId: string;
   chatType: string;
   log?: any;
+  // 群聊多 agent 任务参数
+  taskId?: string;        // 多 agent 任务标识
+  agentCount?: number;    // 总 agent 数
+  currentAgentId?: string; // 当前 agent 标识（用于结果区分）
 }
 
 // Redis 连接缓存
@@ -73,9 +77,9 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg, channel, accountId, from, chatId, chatType, log } = options;
+  const { message, cfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId } = options;
 
-  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}`);
+  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}`);
 
   // 获取 PluginRuntime
   const runtime = getWeGirlRuntime();
@@ -83,6 +87,26 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     log?.error?.('[WeGirl SessionsSend] No runtime available');
     return;
   }
+
+  // 检查 runtime 结构完整性
+  if (!runtime.channel) {
+    log?.error?.('[WeGirl SessionsSend] Runtime has no channel');
+    return;
+  }
+  if (!runtime.channel.routing) {
+    log?.error?.('[WeGirl SessionsSend] Runtime has no channel.routing');
+    return;
+  }
+  if (!runtime.channel.reply) {
+    log?.error?.('[WeGirl SessionsSend] Runtime has no channel.reply');
+    return;
+  }
+  if (typeof runtime.channel.reply.dispatchReplyFromConfig !== 'function') {
+    log?.error?.('[WeGirl SessionsSend] Runtime has no dispatchReplyFromConfig method');
+    return;
+  }
+
+  log?.debug?.('[WeGirl SessionsSend] Runtime check passed');
 
   try {
     // 1. 使用 resolveAgentRoute 查找 agent
@@ -193,6 +217,73 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           return;
         }
 
+        // ========== 群聊多 agent 聚合处理 ==========
+        if (chatType === 'group' && taskId && agentCount && agentCount > 1) {
+          const effectiveAgentId = currentAgentId || agentId;
+          log?.info?.(`[WeGirl SessionsSend] Group multi-agent task: taskId=${taskId}, agent=${effectiveAgentId}, progress=?/${agentCount}`);
+          
+          try {
+            const redis = await getRedisPublisher(cfg);
+            if (!redis) {
+              log?.error?.(`[WeGirl SessionsSend] Redis not available for group aggregation`);
+              return;
+            }
+
+            // 1. 记录此 agent 的结果
+            await redis.hset(`wegirl:task:${taskId}:results`, effectiveAgentId, text);
+            await redis.hset(`wegirl:task:${taskId}:status`, effectiveAgentId, 'completed');
+            await redis.expire(`wegirl:task:${taskId}:results`, 3600); // 1小时过期
+            await redis.expire(`wegirl:task:${taskId}:status`, 3600);
+
+            // 2. 检查是否全部完成
+            const results = await redis.hgetall(`wegirl:task:${taskId}:results`);
+            const completedCount = Object.keys(results).length;
+            log?.info?.(`[WeGirl SessionsSend] Task progress: ${completedCount}/${agentCount} completed`);
+
+            if (completedCount === agentCount) {
+              // 3. 全部完成，聚合并统一回复
+              log?.info?.(`[WeGirl SessionsSend] All agents completed, aggregating results for task ${taskId}`);
+              
+              const aggregated = aggregateGroupResults(results, taskId);
+              
+              // 4. 发送聚合结果到群
+              const replyMessage = {
+                id: `wegirl-reply-${Date.now()}`,
+                type: 'message',
+                routingId: routingId,
+                inReplyTo: messageId,
+                content: aggregated,
+                to: chatId,
+                from: 'agent',
+                agentId: 'coordinator',
+                sessionId: sessionKey,
+                accountId: accountId,
+                status: 'completed',
+                isFinal: true,
+                replyType: 'text',
+                processedAt: Date.now(),
+                duration: Date.now() - createdAt,
+                taskId: taskId,
+                agentResults: results, // 包含各 agent 的原始结果
+                workflowId: undefined,
+                error: undefined,
+                timestamp: Date.now(),
+              };
+              await redis.publish('wegirl:replies', JSON.stringify(replyMessage));
+              log?.info?.(`[WeGirl SessionsSend] Aggregated reply published to wegirl:replies for task ${taskId}`);
+
+              // 5. 清理任务数据
+              await redis.del(`wegirl:task:${taskId}:results`, `wegirl:task:${taskId}:status`);
+            }
+            // 否则：等待其他 agent 完成，不回复
+            return;
+          } catch (err: any) {
+            log?.error?.(`[WeGirl SessionsSend] Group aggregation failed:`, err.message);
+          }
+          return;
+        }
+
+        // ========== 单 agent 回复（原有逻辑）==========
         // 只有 channel="wegirl" 时才通过 outbound 发送
         // 其他 channel（如 feishu）由 Gateway 自动路由，不处理
         if (channel !== 'wegirl') {
@@ -282,4 +373,31 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     log?.error?.(`[WeGirl SessionsSend] Failed: ${err.message}`);
     throw err;
   }
+}
+
+/**
+ * 聚合群聊多 agent 结果
+ * @param results - 各 agent 的结果 {agentId: result}
+ * @param taskId - 任务标识
+ * @returns 聚合后的消息
+ */
+function aggregateGroupResults(results: Record<string, string>, taskId: string): string {
+  const agentIds = Object.keys(results);
+  
+  if (agentIds.length === 1) {
+    return results[agentIds[0]];
+  }
+  
+  // 多 agent 结果聚合
+  const sections: string[] = [];
+  sections.push(`【多 Agent 协作结果】任务: ${taskId}`);
+  sections.push('');
+  
+  for (const [agentId, result] of Object.entries(results)) {
+    sections.push(`【${agentId}】`);
+    sections.push(result);
+    sections.push('');
+  }
+  
+  return sections.join('\n');
 }

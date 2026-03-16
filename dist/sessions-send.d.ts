@@ -7,6 +7,9 @@ interface SessionsSendOptions {
     chatId: string;
     chatType: string;
     log?: any;
+    taskId?: string;
+    agentCount?: number;
+    currentAgentId?: string;
 }
 /**
  * 发送消息到 Agent

@@ -120,6 +120,10 @@ export const wegirlPlugin = {
                             message: data.message, cfg,
                             channel: data.channel, accountId: data.accountId,
                             from: data.from, chatId: data.chatId, chatType: data.chatType, log,
+                            // 群聊多 agent 参数
+                            taskId: data.taskId,
+                            agentCount: data.agentCount,
+                            currentAgentId: data.currentAgentId,
                         });
                         log.info(`[WeGirl Channel] Message delivered from stream: ${data.routingId || 'unknown'}`);
                     }
