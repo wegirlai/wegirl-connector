@@ -1,0 +1,30 @@
+{
+  "name": "wegirl",
+  "version": "1.0.0",
+  "description": "WeGirl Redis connector for OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "wegirl-cli": "./dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "openclaw.plugin.json"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

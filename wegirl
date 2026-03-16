@@ -1,0 +1,31 @@
+#!/bin/bash
+# WeGirl CLI 包装脚本 - 自动加载 Redis 配置
+set -e
+
+# 确定脚本实际所在目录（处理符号链接）
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ $SCRIPT_SOURCE != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+# 加载 OpenClaw 配置中的 Redis 密码
+CONFIG_FILE="${HOME}/.openclaw/openclaw.json"
+if [ -f "$CONFIG_FILE" ]; then
+    export REDIS_PASSWORD=$(grep -o '"redisPassword": "[^"]*"' "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d'"' -f4)
+    export REDIS_DB=$(grep -o '"redisDb": [0-9]*' "$CONFIG_FILE" 2>/dev/null | head -1 | grep -o '[0-9]*')
+fi
+
+# 设置默认环境变量
+export REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
+export REDIS_DB="${REDIS_DB:-1}"
+
+# 调试输出（可选）
+# echo "[DEBUG] REDIS_URL=$REDIS_URL" >&2
+# echo "[DEBUG] REDIS_DB=$REDIS_DB" >&2
+# echo "[DEBUG] REDIS_PASSWORD=${REDIS_PASSWORD:+****}" >&2
+
+# 运行 CLI
+exec node "$SCRIPT_DIR/wegirl-cli.js" "$@"

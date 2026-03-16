@@ -1,0 +1,52 @@
+{
+  "id": "wegirl",
+  "name": "Wegirl",
+  "description": "WeGirl Redis connector for OpenClaw",
+  "version": "1.0.0",
+  "channels": ["wegirl"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "instanceId": {
+        "type": "string",
+        "description": "实例ID，用于区分不同OpenClaw实例",
+        "default": "instance-local"
+      },
+      "redisUrl": {
+        "type": "string",
+        "description": "Redis 连接地址",
+        "default": "redis://localhost:6379"
+      },
+      "redisPassword": {
+        "type": "string",
+        "description": "Redis 密码"
+      },
+      "redisDb": {
+        "type": "number",
+        "description": "Redis 数据库编号",
+        "default": 1
+      },
+      "channel": {
+        "type": "string",
+        "description": "订阅的 Redis 频道",
+        "default": "wegirl:messages"
+      },
+      "keyPrefix": {
+        "type": "string",
+        "description": "Redis 键前缀",
+        "default": "openclaw:events:"
+      },
+      "ttl": {
+        "type": "number",
+        "description": "事件保存时间(秒)",
+        "default": 604800
+      },
+      "enablePubSub": {
+        "type": "boolean",
+        "description": "是否启用 PubSub",
+        "default": true
+      }
+    }
+  }
+}
