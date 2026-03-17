@@ -13,6 +13,8 @@ export declare class MessageRouter {
     constructor(redis: Redis, instanceId: string, logger: any);
     startListening(): Promise<void>;
     private handleChannelMessage;
+    private handleDefaultMessage;
+    private sendReply;
     stop(): Promise<void>;
     publishToInstance(instanceId: string, message: any): Promise<void>;
 }
