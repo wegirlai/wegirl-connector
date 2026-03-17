@@ -3,6 +3,7 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { wegirlSessionsSend } from './sessions-send.js';
+import { getWeGirlRuntime } from './runtime.js';
 
 const KEY_PREFIX = 'wegirl:';
 
@@ -53,6 +54,10 @@ interface WeGirlSendParams {
   chatId?: string;
   chatType?: string;
   from?: string;
+  // 回复路由信息 - 让接收者知道应该往哪里回复
+  replyChannel?: string;
+  replyAccountId?: string;
+  replyTo?: string;
 }
 
 export class WeGirlTools {
@@ -85,7 +90,12 @@ export class WeGirlTools {
     if (target === 'broadcast') {
       return { mode: 'broadcast' };
     }
-    throw new Error(`Invalid target format: ${target}`);
+    // 人类用户ID (ou_ 开头)
+    if (target.startsWith('ou_')) {
+      return { mode: 'human', userId: target };
+    }
+    // 无前缀，默认当作 agent 处理 (如 hr-notifier, default)
+    return { mode: 'agent', agentId: target };
   }
 
   // wegirl_send 工具主入口
@@ -157,7 +167,20 @@ export class WeGirlTools {
         result
       });
 
-      return { ...result, routingId };
+      // 返回 OpenClaw 期望的格式
+      const resultText = result.success 
+        ? `消息已发送给 ${target}: ${result.target || target}`
+        : `发送失败: ${result.error || '未知错误'}`;
+      
+      return {
+        content: [{ type: "text" as const, text: resultText }],
+        details: {
+          success: result.success,
+          target: result.target,
+          routingId,
+          ...result
+        }
+      };
     } catch (error: any) {
       // 发布失败事件
       await this.publishRoutingEvent(routingId, 'failed', {
@@ -275,9 +298,10 @@ export class WeGirlTools {
     // 发布查询 agent 事件
     await this.publishRoutingEvent(routingId, 'agent_lookup', { agentId });
 
-    const agentData = await this.redis.hgetall(`${KEY_PREFIX}agents:${agentId}`);
+    // 使用 staff 而不是 agents
+    const agentData = await this.redis.hgetall(`${KEY_PREFIX}staff:${agentId}`);
 
-    if (!agentData.agentId) {
+    if (!agentData.staffId) {
       await this.publishRoutingEvent(routingId, 'agent_not_found', { agentId });
       throw new Error(`Agent not found: ${agentId}`);
     }
@@ -296,15 +320,51 @@ export class WeGirlTools {
       await this.publishRoutingEvent(routingId, 'local_delivery', { agentId });
 
       try {
-        await wegirlSessionsSend({
+        // 获取发送者信息（从 envelope.from 或 params 中获取）
+        const senderId = envelope.from.agentId || params.from || 'unknown';
+        const senderChannel = params.channel || 'wegirl';
+        const senderAccountId = params.accountId || 'default';
+        
+        // 关键：确定回复路由
+        // 1. 如果 params 中指定了 replyChannel/replyAccountId，使用它们
+        // 2. 否则，使用发送者的 channel/accountId
+        const replyChannel = params.replyChannel || senderChannel;
+        const replyAccountId = params.replyAccountId || senderAccountId;
+        const replyTo = params.replyTo || senderId;
+        
+        this.logger.info(`[WeGirlTools] Sending message: sender=${senderId}, target=${agentId}, replyTo=${replyTo}`);
+        
+        // 使用 wegirlSessionsSend 发送消息给 agent
+        // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
+        wegirlSessionsSend({
           message: params.message,
-          cfg: {}, // 简化的 cfg，实际可能需要传入
-          channel: params.channel || 'wegirl',
-          accountId: params.accountId || 'default',
-          from: envelope.from.agentId,
-          chatId: params.chatId || agentId,
+          cfg: {
+            channels: {
+              wegirl: {
+                accounts: {
+                  [replyAccountId]: {
+                    enabled: true,
+                    redisUrl: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`
+                  }
+                }
+              }
+            }
+          },
+          channel: senderChannel,
+          accountId: senderAccountId,
+          from: senderId,
+          chatId: agentId,
           chatType: params.chatType || 'direct',
+          // 关键：设置 metadata，让回复能路由回发送者
+          metadata: {
+            originatingChannel: replyChannel,
+            originatingTo: replyTo,
+            originatingAccountId: replyAccountId,
+            replyTo: replyTo,
+          },
           log: this.logger
+        }).catch((err: any) => {
+          this.logger.error(`[WeGirlTools] wegirlSessionsSend failed:`, err.message);
         });
 
         await this.publishRoutingEvent(routingId, 'local_delivered', { agentId });

@@ -146,10 +146,28 @@ export interface WeGirlSendParams {
         ttl?: number;
     };
 }
-export interface RegistryEntry {
-    agentId: string;
-    instanceId: string;
+export interface StaffInfo {
+    staffId: string;
     type: 'agent' | 'human';
+    name: string;
+    capabilities?: string[];
+    maxConcurrent?: number;
+    instanceId?: string;
+    metadata?: Record<string, unknown>;
+    agentId?: string;
+    userId?: string;
+    departments?: string[];
+    availability?: {
+        status: 'online' | 'busy' | 'offline' | 'dnd';
+        workHours?: string;
+        timezone?: string;
+    };
+    skills?: Record<string, SkillInfo>;
+}
+export interface RegistryEntry {
+    staffId: string;
+    type: 'agent' | 'human';
+    instanceId: string;
     name: string;
     capabilities: string[];
     maxConcurrent: number;
@@ -160,5 +178,7 @@ export interface RegistryEntry {
         activeTasks: number;
         pendingTasks: number;
     };
+    agentId?: string;
+    userId?: string;
 }
 //# sourceMappingURL=protocol.d.ts.map

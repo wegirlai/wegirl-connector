@@ -119,7 +119,9 @@ export class PendingQueue {
         // 状态筛选
         if (status) {
             const statuses = Array.isArray(status) ? status : [status];
-            entries = entries.filter(e => statuses.some(s => e.startsWith(`${s}:`)));
+            if (statuses.length > 0) {
+                entries = entries.filter(e => statuses.some(s => e.startsWith(`${s}:`)));
+            }
         }
         const total = entries.length;
         // 分页

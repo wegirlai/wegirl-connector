@@ -79,7 +79,8 @@ const plugin = {
                 if (agentId && redisClient) {
                     registry = new Registry(redisClient, INSTANCE_ID, logger);
                     await registry.register({
-                        agentId,
+                        staffId: agentId,
+                        type: 'agent',
                         name: config.agentName || agentId,
                         capabilities: config.capabilities || [],
                         maxConcurrent: config.maxConcurrent || 3,
@@ -128,19 +129,30 @@ const plugin = {
         if (typeof context.registerTool === 'function') {
             context.registerTool({
                 name: 'wegirl_send',
-                description: 'Send message through WeGirl hub',
+                description: 'Send message through WeGirl hub to other agents or humans',
                 parameters: {
                     type: 'object',
                     properties: {
-                        target: { type: 'string' },
-                        message: { type: 'string' }
-                    }
+                        target: {
+                            type: 'string',
+                            description: 'Target address, e.g., "default", "scout-notifier", "ou_xxx" (human user)'
+                        },
+                        message: {
+                            type: 'string',
+                            description: 'Message content to send'
+                        }
+                    },
+                    required: ['target', 'message']
                 },
-                handler: async (args) => {
+                execute: async (_toolCallId, params) => {
+                    // 使用 console.log 确保日志输出（logger 可能在此上下文中不可用）
+                    console.log(`[WeGirl] ========== wegirl_send execute ==========`);
+                    console.log(`[WeGirl] _toolCallId:`, _toolCallId);
+                    console.log(`[WeGirl] params:`, JSON.stringify(params, null, 2));
                     await initRedis();
                     if (!wegirlTools)
                         throw new Error('WeGirl not initialized');
-                    return wegirlTools.send(args);
+                    return wegirlTools.send(params);
                 }
             });
             // HR Manage Tool - 仅限 HR Agent 使用
@@ -181,21 +193,18 @@ const plugin = {
                     },
                     required: ['action']
                 },
-                handler: async (args, ctx) => {
-                    // 权限检查：仅限 HR Agent
-                    const agentId = ctx?.agentId || ctx?.session?.agentId;
-                    if (agentId !== 'hr') {
-                        throw new Error('此工具仅限 HR Agent 使用');
-                    }
+                execute: async (_toolCallId, params) => {
+                    logger.info(`[hr_manage] 被调用, params=`, JSON.stringify(params));
                     await initRedis();
                     if (!redisClient)
                         throw new Error('Redis not initialized');
-                    const { action } = args;
+                    const { action } = params;
                     const INSTANCE_ID = pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+                    let result;
                     switch (action) {
                         case 'create_agent': {
                             // 参数处理与验证
-                            let { agentName, accountId, instanceId, capabilities, role } = args;
+                            let { agentName, accountId, instanceId, capabilities, role } = params;
                             // agentName 必填
                             if (!agentName) {
                                 throw new Error('缺少必填参数: agentName');
@@ -212,7 +221,7 @@ const plugin = {
                             accountId = accountId || `${agentName}-notifier`;
                             // role 默认为 '-'
                             role = role || '-';
-                            return executeCreateAgent({
+                            result = await executeCreateAgent({
                                 agentName,
                                 accountId,
                                 instanceId,
@@ -223,16 +232,25 @@ const plugin = {
                                 logger,
                                 redis: redisClient
                             });
+                            break;
                         }
                         case 'list_agents':
-                            return handleListAgents(redisClient, logger);
+                            result = await handleListAgents(redisClient, logger);
+                            break;
                         case 'get_agent':
-                            return handleGetAgent(args, redisClient, logger);
+                            result = await handleGetAgent(params, redisClient, logger);
+                            break;
                         case 'delete_agent':
-                            return handleDeleteAgent(args, redisClient, logger);
+                            result = await handleDeleteAgent(params, redisClient, logger);
+                            break;
                         default:
                             throw new Error(`未知操作: ${action}`);
                     }
+                    // 返回 OpenClaw 期望的格式
+                    return {
+                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+                        details: result
+                    };
                 }
             });
             logger.info('[WeGirl] Tools registered: wegirl_send, hr_manage');
@@ -372,12 +390,20 @@ const plugin = {
                         catch (err) {
                             metrics.pending = { error: err.message };
                         }
-                        // 4. 活跃 Agent 统计
+                        // 4. 活跃 Agent 统计 (使用统一的 staff key)
                         try {
-                            const agentKeys = await redisClient.keys(`${KEY_PREFIX}agents:*`);
+                            const staffKeys = await redisClient.keys(`${KEY_PREFIX}staff:*`);
+                            const agentKeys = staffKeys.filter(k => !k.includes(':by-type:') && !k.includes(':capability:'));
+                            const agentIds = [];
+                            for (const key of agentKeys) {
+                                const data = await redisClient.hgetall(key);
+                                if (data.type === 'agent') {
+                                    agentIds.push(data.staffId);
+                                }
+                            }
                             metrics.agents = {
-                                total: agentKeys.length,
-                                list: agentKeys.map(k => k.replace(`${KEY_PREFIX}agents:`, ''))
+                                total: agentIds.length,
+                                list: agentIds
                             };
                         }
                         catch (err) {
@@ -467,20 +493,24 @@ function getOpenClawHome() {
  * 注意：实际实现已移至 hr-manage-core.ts 中的 executeCreateAgent
  */
 /**
- * 列出所有 Agents
+ * 列出所有 Agents (使用统一的 staff key)
  */
 async function handleListAgents(redis, logger) {
     logger.info('[hr_manage] Listing all agents');
     const KEY_PREFIX = 'wegirl:';
-    const keys = await redis.keys(`${KEY_PREFIX}agents:*`);
-    const agents = await Promise.all(keys.map(async (key) => {
+    // 获取所有 staff，过滤出 agent 类型
+    const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
+    const staffKeys = keys.filter(k => !k.includes(':by-type:') && !k.includes(':capability:'));
+    const agents = await Promise.all(staffKeys.map(async (key) => {
         const data = await redis.hgetall(key);
-        const type = data.type || 'agent';
+        // 只返回 agent 类型
+        if (data.type !== 'agent')
+            return null;
         return {
-            accountId: data.agentId,
+            accountId: data.staffId,
             name: data.name,
-            type: type,
-            role: data.role || '-', // 职能/角色
+            type: data.type,
+            role: data.role || '-',
             instanceId: data.instanceId,
             status: data.status,
             capabilities: data.capabilities?.split(',') || [],
@@ -489,25 +519,25 @@ async function handleListAgents(redis, logger) {
     }));
     return {
         success: true,
-        count: agents.length,
-        agents: agents.filter(a => a.accountId)
+        count: agents.filter(a => a !== null).length,
+        agents: agents.filter(a => a !== null)
     };
 }
 /**
- * 获取单个 Agent 信息
+ * 获取单个 Agent 信息 (使用统一的 staff key)
  */
 async function handleGetAgent(args, redis, logger) {
     const { accountId } = args;
     logger.info(`[hr_manage] Getting agent: ${accountId}`);
     const KEY_PREFIX = 'wegirl:';
-    const data = await redis.hgetall(`${KEY_PREFIX}agents:${accountId}`);
-    if (!data.agentId) {
+    const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+    if (!data.staffId) {
         return { success: false, error: `Agent not found: ${accountId}` };
     }
     return {
         success: true,
         agent: {
-            accountId: data.agentId,
+            accountId: data.staffId,
             name: data.name,
             instanceId: data.instanceId,
             status: data.status,
@@ -521,15 +551,15 @@ async function handleGetAgent(args, redis, logger) {
     };
 }
 /**
- * 删除 Agent（仅 Redis 注册信息）
+ * 删除 Agent（仅 Redis 注册信息）- 使用统一的 staff key
  */
 async function handleDeleteAgent(args, redis, logger) {
     const { accountId } = args;
     logger.info(`[hr_manage] Deleting agent: ${accountId}`);
     const KEY_PREFIX = 'wegirl:';
-    // 获取 agent 信息
-    const data = await redis.hgetall(`${KEY_PREFIX}agents:${accountId}`);
-    if (!data.agentId) {
+    // 获取 staff 信息
+    const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+    if (!data.staffId) {
         return { success: false, error: `Agent not found: ${accountId}` };
     }
     const capabilities = data.capabilities?.split(',') || [];
@@ -538,10 +568,12 @@ async function handleDeleteAgent(args, redis, logger) {
     for (const cap of capabilities) {
         await redis.srem(`${KEY_PREFIX}capability:${cap}`, accountId);
     }
-    // 从实例集合移除
-    await redis.srem(`${KEY_PREFIX}instance:${instanceId}:agents`, accountId);
-    // 删除 agent 信息
-    await redis.del(`${KEY_PREFIX}agents:${accountId}`);
+    // 从类型索引移除
+    await redis.srem(`${KEY_PREFIX}staff:by-type:agent`, accountId);
+    // 从实例集合移除 (使用新的 staff 集合)
+    await redis.srem(`${KEY_PREFIX}instance:${instanceId}:staff`, accountId);
+    // 删除 staff 信息
+    await redis.del(`${KEY_PREFIX}staff:${accountId}`);
     logger.info(`[hr_manage] Agent ${accountId} deleted from Redis`);
     return {
         success: true,
@@ -571,44 +603,54 @@ async function getLocalAgents(logger) {
         return [];
     }
 }
-// 从 Redis 清理单个 agent
+// 从 Redis 清理单个 agent (使用统一的 staff key)
 async function cleanupAgentFromRedis(accountId, instanceId, redis, logger) {
     const KEY_PREFIX = 'wegirl:';
-    const agentData = await redis.hgetall(`${KEY_PREFIX}agents:${accountId}`);
-    const capabilities = agentData.capabilities?.split(',') || [];
+    const staffData = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+    const capabilities = staffData.capabilities?.split(',') || [];
     // 删除能力索引
     for (const cap of capabilities) {
         await redis.srem(`${KEY_PREFIX}capability:${cap}`, accountId);
     }
-    // 从实例集合移除
-    await redis.srem(`${KEY_PREFIX}instance:${instanceId}:agents`, accountId);
-    // 删除 agent 信息
-    await redis.del(`${KEY_PREFIX}agents:${accountId}`);
+    // 从类型索引移除
+    await redis.srem(`${KEY_PREFIX}staff:by-type:agent`, accountId);
+    // 从实例集合移除 (使用新的 staff 集合)
+    await redis.srem(`${KEY_PREFIX}instance:${instanceId}:staff`, accountId);
+    // 删除 staff 信息
+    await redis.del(`${KEY_PREFIX}staff:${accountId}`);
     logger.info(`[sync] Cleaned up zombie agent: ${accountId}`);
 }
-// 同步 agents：注册本地 agents，清理僵尸 agents
+// 同步 agents：注册本地 agents，清理僵尸 agents (使用统一的 staff key)
 async function syncAgentsFromLocal(instanceId, redis, logger) {
     const KEY_PREFIX = 'wegirl:';
     logger.info(`[sync] Starting agent sync for instance: ${instanceId}`);
     // 1. 获取本地所有 agents
     const localAgents = await getLocalAgents(logger);
     logger.info(`[sync] Found ${localAgents.length} local agents`);
-    // 2. 获取 Redis 中该实例的所有 agents
-    const redisAgentIds = await redis.smembers(`${KEY_PREFIX}instance:${instanceId}:agents`);
+    // 2. 获取 Redis 中该实例的所有 staff (agent 类型)
+    const redisStaffIds = await redis.smembers(`${KEY_PREFIX}instance:${instanceId}:staff`);
+    // 过滤出 agent 类型的 staff
+    const redisAgentIds = [];
+    for (const staffId of redisStaffIds) {
+        const data = await redis.hgetall(`${KEY_PREFIX}staff:${staffId}`);
+        if (data.type === 'agent') {
+            redisAgentIds.push(staffId);
+        }
+    }
     logger.info(`[sync] Found ${redisAgentIds.length} agents in Redis`);
     const toKeep = [];
     const toRemove = [];
     const toRegister = [];
     // 检查 Redis 中的 agents：保留存在的，清理僵尸
     for (const accountId of redisAgentIds) {
-        const agentData = await redis.hgetall(`${KEY_PREFIX}agents:${accountId}`);
-        const agentName = agentData.name?.replace(' Notifier', '').toLowerCase();
+        const staffData = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+        const agentName = staffData.name?.replace(' Notifier', '').toLowerCase();
         // 检查本地是否存在
-        const existsLocally = localAgents.some(a => a.name.toLowerCase() === agentName || a.id === accountId);
+        const existsLocally = localAgents?.some(a => a?.name?.toLowerCase() === agentName || a?.id === accountId) || false;
         if (existsLocally) {
             toKeep.push(accountId);
             // 更新心跳
-            await redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
+            await redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
                 lastHeartbeat: Date.now().toString(),
                 status: 'online'
             });
@@ -619,21 +661,23 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         }
     }
     // 检查本地 agents：注册 Redis 中不存在的
-    for (const localAgent of localAgents) {
+    for (const localAgent of localAgents || []) {
+        if (!localAgent?.name)
+            continue;
         const accountId = `${localAgent.name}-notifier`;
         if (!redisAgentIds.includes(accountId)) {
             toRegister.push(localAgent);
         }
     }
-    // 3. 注册新 agents
+    // 3. 注册新 agents (使用统一的 staff key)
     for (const agent of toRegister) {
         const accountId = `${agent.name}-notifier`;
         const agentCapabilities = [agent.name, 'wegirl_send'];
-        await redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
-            agentId: accountId,
-            instanceId: instanceId,
+        await redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
+            staffId: accountId,
             type: 'agent',
-            role: '-', // 默认职能为空
+            instanceId: instanceId,
+            role: '-',
             name: agent.name,
             capabilities: agentCapabilities.join(','),
             status: 'online',
@@ -645,8 +689,10 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         for (const cap of agentCapabilities) {
             await redis.sadd(`${KEY_PREFIX}capability:${cap}`, accountId);
         }
-        // 添加到实例集合
-        await redis.sadd(`${KEY_PREFIX}instance:${instanceId}:agents`, accountId);
+        // 添加到类型索引
+        await redis.sadd(`${KEY_PREFIX}staff:by-type:agent`, accountId);
+        // 添加到实例集合 (使用新的 staff 集合)
+        await redis.sadd(`${KEY_PREFIX}instance:${instanceId}:staff`, accountId);
         logger.info(`[sync] Registered agent: ${accountId}`);
     }
     // 4. 清理僵尸 agents

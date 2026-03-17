@@ -1,4 +1,4 @@
-// src/registry.ts - Agent/人类注册与心跳管理
+// src/registry.ts - Staff 注册与心跳管理 (统一 agents/humans)
 const KEY_PREFIX = 'wegirl:';
 const HEARTBEAT_INTERVAL = 30000; // 30秒
 const HEARTBEAT_TIMEOUT = 90000; // 90秒
@@ -16,65 +16,73 @@ export class Registry {
     key(...parts) {
         return `${KEY_PREFIX}${parts.join(':')}`;
     }
-    // 注册 Agent
-    async registerAgent(agentInfo, instanceInfo) {
+    // 注册 Staff (统一 agent/human)
+    async registerStaff(staffInfo, instanceInfo) {
         const entry = {
-            agentId: agentInfo.agentId,
+            staffId: staffInfo.staffId,
+            type: staffInfo.type, // 'agent' | 'human'
             instanceId: instanceInfo.instanceId,
-            type: 'agent',
-            name: agentInfo.name,
-            capabilities: agentInfo.capabilities,
-            maxConcurrent: agentInfo.maxConcurrent,
+            name: staffInfo.name,
+            capabilities: staffInfo.capabilities || [],
+            maxConcurrent: staffInfo.maxConcurrent || 3,
             status: 'online',
             lastHeartbeat: Date.now(),
-            metadata: {
-                supportedModels: agentInfo.supportedModels,
-                ...agentInfo.metadata
-            },
+            metadata: staffInfo.metadata || {},
             load: {
                 activeTasks: 0,
                 pendingTasks: 0
             }
         };
         const pipeline = this.redis.pipeline();
-        // 保存 Agent 信息
-        pipeline.hset(this.key('agents', agentInfo.agentId), this.flattenObject(entry));
-        // 添加到实例的 Agent 集合
-        pipeline.sadd(this.key('instance', instanceInfo.instanceId, 'agents'), agentInfo.agentId);
-        // 添加到能力索引
-        for (const cap of agentInfo.capabilities) {
-            pipeline.sadd(this.key('capability', cap), agentInfo.agentId);
+        // 保存 Staff 信息 (统一 key: wegirl:staff:{id})
+        pipeline.hset(this.key('staff', staffInfo.staffId), this.flattenObject(entry));
+        // 添加到实例的 Staff 集合
+        pipeline.sadd(this.key('instance', instanceInfo.instanceId, 'staff'), staffInfo.staffId);
+        // 添加到类型索引
+        pipeline.sadd(this.key('staff', 'by-type', staffInfo.type), staffInfo.staffId);
+        // 添加到能力索引 (统一)
+        for (const cap of staffInfo.capabilities || []) {
+            pipeline.sadd(this.key('capability', cap), staffInfo.staffId);
         }
         await pipeline.exec();
-        this.logger.info(`[Registry] Agent registered: ${agentInfo.agentId}@${instanceInfo.instanceId}`);
-        // 启动心跳
-        this.startHeartbeat(agentInfo.agentId, instanceInfo.instanceId);
+        this.logger.info(`[Registry] Staff registered: ${staffInfo.staffId} (${staffInfo.type}) @${instanceInfo.instanceId}`);
+        // 只有 agent 启动心跳
+        if (staffInfo.type === 'agent') {
+            this.startHeartbeat(staffInfo.staffId, instanceInfo.instanceId);
+        }
     }
-    // 注册人类用户
+    // 向后兼容: 注册 Agent
+    async registerAgent(agentInfo, instanceInfo) {
+        await this.registerStaff({
+            staffId: agentInfo.agentId,
+            type: 'agent',
+            name: agentInfo.name,
+            capabilities: agentInfo.capabilities,
+            maxConcurrent: agentInfo.maxConcurrent,
+            metadata: agentInfo.metadata
+        }, instanceInfo);
+    }
+    // 向后兼容: 注册 Human
     async registerHuman(humanInfo) {
-        const key = this.key('humans', humanInfo.userId);
-        const pipeline = this.redis.pipeline();
-        pipeline.hset(key, this.flattenObject(humanInfo));
-        // 添加到能力索引
-        for (const cap of humanInfo.capabilities) {
-            pipeline.sadd(this.key('capability', cap, 'humans'), humanInfo.userId);
-        }
-        // 添加到部门索引
-        if (humanInfo.departments) {
-            for (const dept of humanInfo.departments) {
-                pipeline.sadd(this.key('department', dept), humanInfo.userId);
+        await this.registerStaff({
+            staffId: humanInfo.userId,
+            type: 'human',
+            name: humanInfo.name,
+            capabilities: humanInfo.capabilities,
+            metadata: {
+                departments: humanInfo.departments,
+                skills: humanInfo.skills,
+                availability: humanInfo.availability
             }
-        }
-        await pipeline.exec();
-        this.logger.info(`[Registry] Human registered: ${humanInfo.userId}`);
+        }, { instanceId: this.instanceId, version: '1.0' });
     }
     // 简化的 register 方法
-    async register(agentInfo) {
-        await this.registerAgent(agentInfo, { instanceId: this.instanceId });
+    async register(staffInfo) {
+        await this.registerStaff(staffInfo, { instanceId: this.instanceId, version: '1.0' });
     }
     // 发送心跳
-    async heartbeat(agentId, load) {
-        const key = this.key('agents', agentId);
+    async heartbeat(staffId, load) {
+        const key = this.key('staff', staffId);
         const updates = {
             lastHeartbeat: Date.now().toString(),
             status: 'online',
@@ -86,159 +94,165 @@ export class Registry {
         await this.redis.hset(key, updates);
     }
     // 启动定时心跳
-    startHeartbeat(agentId, instanceId) {
-        if (this.heartbeatTimers.has(agentId)) {
-            clearInterval(this.heartbeatTimers.get(agentId));
+    startHeartbeat(staffId, instanceId) {
+        if (this.heartbeatTimers.has(staffId)) {
+            clearInterval(this.heartbeatTimers.get(staffId));
         }
         const timer = setInterval(async () => {
             try {
-                await this.heartbeat(agentId);
+                await this.heartbeat(staffId);
             }
             catch (err) {
-                this.logger.error(`[Registry] Heartbeat failed for ${agentId}:`, err.message);
+                this.logger.error(`[Registry] Heartbeat failed for ${staffId}:`, err.message);
             }
         }, HEARTBEAT_INTERVAL);
-        this.heartbeatTimers.set(agentId, timer);
+        this.heartbeatTimers.set(staffId, timer);
     }
-    // 注销 Agent
-    async unregisterAgent(agentId) {
+    // 注销 Staff
+    async unregisterStaff(staffId) {
         // 停止心跳
-        if (this.heartbeatTimers.has(agentId)) {
-            clearInterval(this.heartbeatTimers.get(agentId));
-            this.heartbeatTimers.delete(agentId);
+        if (this.heartbeatTimers.has(staffId)) {
+            clearInterval(this.heartbeatTimers.get(staffId));
+            this.heartbeatTimers.delete(staffId);
         }
-        // 获取 Agent 信息
-        const agentData = await this.redis.hgetall(this.key('agents', agentId));
-        if (!agentData || Object.keys(agentData).length === 0) {
+        // 获取 Staff 信息
+        const staffData = await this.redis.hgetall(this.key('staff', staffId));
+        if (!staffData || Object.keys(staffData).length === 0) {
             return;
         }
-        const capabilitiesStr = agentData.capabilities || '';
+        const capabilitiesStr = staffData.capabilities || '';
         const capabilities = capabilitiesStr ? capabilitiesStr.split(',') : [];
-        const instanceId = agentData.instanceId;
+        const instanceId = staffData.instanceId;
+        const type = staffData.type;
         const pipeline = this.redis.pipeline();
-        // 删除 Agent 信息
-        pipeline.del(this.key('agents', agentId));
+        // 删除 Staff 信息
+        pipeline.del(this.key('staff', staffId));
         // 从实例集合移除
         if (instanceId) {
-            pipeline.srem(this.key('instance', instanceId, 'agents'), agentId);
+            pipeline.srem(this.key('instance', instanceId, 'staff'), staffId);
+        }
+        // 从类型索引移除
+        if (type) {
+            pipeline.srem(this.key('staff', 'by-type', type), staffId);
         }
         // 从能力索引移除
         for (const cap of capabilities) {
             if (cap) {
-                pipeline.srem(this.key('capability', cap), agentId);
+                pipeline.srem(this.key('capability', cap), staffId);
             }
         }
         await pipeline.exec();
-        this.logger.info(`[Registry] Agent unregistered: ${agentId}`);
+        this.logger.info(`[Registry] Staff unregistered: ${staffId}`);
     }
-    // 查询 Agent 信息
+    // 向后兼容: 注销 Agent
+    async unregisterAgent(agentId) {
+        await this.unregisterStaff(agentId);
+    }
+    // 查询 Staff 信息
+    async getStaff(staffId) {
+        const data = await this.redis.hgetall(this.key('staff', staffId));
+        if (!data || Object.keys(data).length === 0) {
+            return null;
+        }
+        return this.unflattenObject(data);
+    }
+    // 向后兼容: 查询 Agent
     async getAgent(agentId) {
-        const data = await this.redis.hgetall(this.key('agents', agentId));
-        if (!data || Object.keys(data).length === 0) {
-            return null;
-        }
-        return this.unflattenObject(data);
+        return this.getStaff(agentId);
     }
-    // 查询人类信息
+    // 向后兼容: 查询 Human
     async getHuman(userId) {
-        const data = await this.redis.hgetall(this.key('humans', userId));
-        if (!data || Object.keys(data).length === 0) {
-            return null;
-        }
-        return this.unflattenObject(data);
+        return this.getStaff(userId);
     }
-    // 根据能力查找 Agent
-    async findAgentsByCapability(capability, strategy = 'least-load') {
-        const agentIds = await this.redis.smembers(this.key('capability', capability));
-        if (agentIds.length === 0) {
+    // 根据能力查找 Staff
+    async findStaffByCapability(capability, strategy = 'least-load') {
+        const staffIds = await this.redis.smembers(this.key('capability', capability));
+        if (staffIds.length === 0) {
             return [];
         }
-        const agents = [];
-        for (const agentId of agentIds) {
-            const agent = await this.getAgent(agentId);
-            if (agent && agent.status === 'online') {
-                agents.push(agent);
+        const staff = [];
+        for (const staffId of staffIds) {
+            const s = await this.getStaff(staffId);
+            if (s && s.status === 'online') {
+                staff.push(s);
             }
         }
         // 应用策略
         switch (strategy) {
             case 'least-load':
-                return agents.sort((a, b) => {
+                return staff.sort((a, b) => {
                     const loadA = a.load?.activeTasks || 0;
                     const loadB = b.load?.activeTasks || 0;
                     return loadA - loadB;
                 });
             case 'random':
-                return agents.sort(() => Math.random() - 0.5);
+                return staff.sort(() => Math.random() - 0.5);
             case 'first':
             default:
-                return agents;
+                return staff;
         }
     }
-    // 根据能力查找人类
-    async findHumansByCapability(capability, options) {
-        const userIds = await this.redis.smembers(this.key('capability', capability, 'humans'));
-        if (userIds.length === 0) {
-            return [];
+    // 向后兼容: 根据能力查找 Agent
+    async findAgentsByCapability(capability, strategy = 'least-load') {
+        const all = await this.findStaffByCapability(capability, strategy);
+        return all.filter(s => s.type === 'agent');
+    }
+    // 获取实例的所有 Staff
+    async getInstanceStaff(instanceId) {
+        const staffIds = await this.redis.smembers(this.key('instance', instanceId, 'staff'));
+        const staff = [];
+        for (const staffId of staffIds) {
+            const s = await this.getStaff(staffId);
+            if (s) {
+                staff.push(s);
+            }
         }
-        const humans = [];
-        for (const userId of userIds) {
-            const human = await this.getHuman(userId);
-            if (!human)
+        return staff;
+    }
+    // 获取所有在线 Staff
+    async getOnlineStaff() {
+        const pattern = this.key('staff', '*');
+        const keys = await this.redis.keys(pattern);
+        const staff = [];
+        for (const key of keys) {
+            const staffId = key.split(':').pop();
+            if (!staffId)
                 continue;
-            // 检查在线状态
-            if (options?.requireOnline && human.availability?.status !== 'online') {
-                continue;
-            }
-            // 检查技能等级
-            if (options?.minLevel && human.skills?.[capability]) {
-                const level = human.skills[capability].level;
-                const levelOrder = { junior: 1, senior: 2, expert: 3 };
-                if (levelOrder[level] < levelOrder[options.minLevel]) {
-                    continue;
-                }
-            }
-            humans.push(human);
-        }
-        return humans;
-    }
-    // 获取实例的所有 Agent
-    async getInstanceAgents(instanceId) {
-        const agentIds = await this.redis.smembers(this.key('instance', instanceId, 'agents'));
-        const agents = [];
-        for (const agentId of agentIds) {
-            const agent = await this.getAgent(agentId);
-            if (agent) {
-                agents.push(agent);
+            const s = await this.getStaff(staffId);
+            if (s && s.status === 'online') {
+                staff.push(s);
             }
         }
-        return agents;
+        return staff;
     }
-    // 清理过期 Agent
-    async cleanupExpiredAgents() {
-        const offlineAgents = [];
+    // 清理过期 Staff (仅针对 agent 类型)
+    async cleanupExpiredStaff() {
+        const offlineStaff = [];
         const now = Date.now();
-        // 使用 keys 扫描所有 Agent
-        const pattern = this.key('agents', '*');
+        // 扫描所有 Staff
+        const pattern = this.key('staff', '*');
         const keys = await this.redis.keys(pattern);
         for (const key of keys) {
-            const agentId = key.split(':').pop();
-            if (!agentId)
+            const staffId = key.split(':').pop();
+            if (!staffId)
                 continue;
-            const agent = await this.getAgent(agentId);
-            if (!agent)
+            const s = await this.getStaff(staffId);
+            if (!s)
                 continue;
-            // 检查是否过期，只标记为 offline
-            if (now - agent.lastHeartbeat > HEARTBEAT_TIMEOUT && agent.status === 'online') {
+            // 只处理 agent 类型
+            if (s.type !== 'agent')
+                continue;
+            // 检查是否过期
+            if (now - s.lastHeartbeat > HEARTBEAT_TIMEOUT && s.status === 'online') {
                 await this.redis.hset(key, {
                     status: 'offline',
                     lastHeartbeat: now.toString()
                 });
-                offlineAgents.push(agentId);
-                this.logger.warn(`[Registry] Agent marked offline: ${agentId}`);
+                offlineStaff.push(staffId);
+                this.logger.warn(`[Registry] Agent marked offline: ${staffId}`);
             }
         }
-        return offlineAgents;
+        return offlineStaff;
     }
     // 扁平化对象
     flattenObject(obj, prefix = '') {
@@ -297,9 +311,9 @@ export class Registry {
     }
     // 销毁
     destroy() {
-        for (const [agentId, timer] of this.heartbeatTimers) {
+        for (const [staffId, timer] of this.heartbeatTimers) {
             clearInterval(timer);
-            this.logger.info(`[Registry] Stopped heartbeat for ${agentId}`);
+            this.logger.info(`[Registry] Stopped heartbeat for ${staffId}`);
         }
         this.heartbeatTimers.clear();
     }

@@ -200,11 +200,33 @@ export interface WeGirlSendParams {
   };
 }
 
-// 注册信息（存储在 Redis）
-export interface RegistryEntry {
-  agentId: string;
-  instanceId: string;
+// 统一的 Staff 信息（替代 AgentInfo/HumanInfo）
+export interface StaffInfo {
+  staffId: string;
   type: 'agent' | 'human';
+  name: string;
+  capabilities?: string[];
+  maxConcurrent?: number;
+  instanceId?: string;
+  metadata?: Record<string, unknown>;
+  // 向后兼容
+  agentId?: string;  // 对于 agent 类型，等于 staffId
+  userId?: string;   // 对于 human 类型，等于 staffId
+  // 人类特有字段
+  departments?: string[];
+  availability?: {
+    status: 'online' | 'busy' | 'offline' | 'dnd';
+    workHours?: string;
+    timezone?: string;
+  };
+  skills?: Record<string, SkillInfo>;
+}
+
+// 注册信息（存储在 Redis）- 统一使用 staffId
+export interface RegistryEntry {
+  staffId: string;
+  type: 'agent' | 'human';
+  instanceId: string;
   name: string;
   capabilities: string[];
   maxConcurrent: number;
@@ -215,4 +237,7 @@ export interface RegistryEntry {
     activeTasks: number;
     pendingTasks: number;
   };
+  // 向后兼容字段
+  agentId?: string;  // 对于 agent 类型，staffId 和 agentId 相同
+  userId?: string;   // 对于 human 类型，staffId 和 userId 相同
 }

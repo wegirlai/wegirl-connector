@@ -184,6 +184,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // 构建 inbound context
     // Provider/Surface: wegirl（当前渠道）
     // OriginatingChannel/OriginatingTo: 目标渠道，Gateway 会自动路由回复到该渠道
+    // 使用 metadata 中的 originatingChannel/originatingTo 设置回复路由
     const inboundCtx = runtime.channel.reply.finalizeInboundContext({
       Body: body,
       BodyForAgent: message,
@@ -203,8 +204,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       Timestamp: Date.now(),
       WasMentioned: true,
       CommandAuthorized: true,
-      OriginatingChannel: channel,
-      OriginatingTo: chatId,
+      // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
+      OriginatingChannel: originalMetadata?.originatingChannel || channel,
+      OriginatingTo: originalMetadata?.originatingTo || from,
+      // 强制指定模型，避免使用默认的 anthropic
+      Model: 'kimi-coding/k2p5',
     });
 
     log?.info?.(`[WeGirl SessionsSend] dispatching to agent (session=${sessionKey}, replyTo=${channel}:${accountId})`);
@@ -338,7 +342,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 replyType: 'error',
                 processedAt: Date.now(),
                 duration: Date.now() - createdAt,
-                workflowId: undefined,
+                workflowId: undefined, // 预留：工作流编排
                 error: err.message,
                 errorCode: 'REPLY_PUBLISH_FAILED',
                 timestamp: Date.now(),

@@ -26,11 +26,32 @@ async function checkAgentExists(agentName) {
     try {
         const { stdout } = await execAsync('openclaw agents list --json 2>/dev/null || echo "[]"');
         const agents = JSON.parse(stdout || '[]');
-        return agents.some((a) => a.id === agentName || a.name === agentName);
+        return agents?.some((a) => a.id === agentName || a.name === agentName) || false;
     }
     catch {
         return false;
     }
+}
+// 检查 accountId 是否已被占用（在 openclaw.json 的 bindings 中）
+function checkAccountIdInUse(accountId) {
+    try {
+        const configPath = getOpenClawConfigPath();
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const binding = config.bindings?.find((b) => b.match?.channel === 'wegirl' && b.match?.accountId === accountId);
+        if (binding) {
+            return { inUse: true, agentId: binding.agentId };
+        }
+        return { inUse: false };
+    }
+    catch {
+        return { inUse: false };
+    }
+}
+// 检查 accountId 是否已在 Redis 中注册
+async function checkAccountIdInRedis(accountId, redis) {
+    const KEY_PREFIX = 'wegirl:';
+    const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+    return !!data.staffId;
 }
 // 执行创建 Agent
 export async function executeCreateAgent(params, ctx) {
@@ -42,14 +63,14 @@ export async function executeCreateAgent(params, ctx) {
         alreadyExisted: false,
         steps: [],
         metadata: {
-            workspacePath: path.join(getOpenClawHome(), `workspace-${agentName}`),
+            workspacePath: path.join(getOpenClawHome(), 'agents', agentName),
             configUpdated: false,
             redisRegistered: false,
             streamed: false
         }
     };
     try {
-        // Step 0: 检查是否已存在
+        // Step 0: 检查 agentName 是否已存在
         ctx.logger.info(`[hr_manage] Checking if agent ${agentName} exists...`);
         const exists = await checkAgentExists(agentName);
         if (exists) {
@@ -59,35 +80,46 @@ export async function executeCreateAgent(params, ctx) {
             return results;
         }
         results.steps.push({ step: 0, name: 'check_exists', status: 'success', message: 'Agent does not exist' });
-        // Step 1: 创建 Agent
+        // Step 0.5: 检查 accountId 是否已被占用
+        ctx.logger.info(`[hr_manage] Checking if accountId ${accountId} is available...`);
+        const bindingCheck = checkAccountIdInUse(accountId);
+        if (bindingCheck.inUse) {
+            throw new Error(`accountId "${accountId}" 已被 agent "${bindingCheck.agentId}" 占用，请选择其他 accountId`);
+        }
+        const redisCheck = await checkAccountIdInRedis(accountId, ctx.redis);
+        if (redisCheck) {
+            throw new Error(`accountId "${accountId}" 已在 Redis 中注册，请先删除或选择其他 accountId`);
+        }
+        results.steps.push({ step: 0, name: 'check_accountId', status: 'success', message: 'accountId available' });
+        // Step 1: 创建 Agent（使用非交互模式）
         ctx.logger.info(`[hr_manage] Step 1: Creating agent ${agentName}...`);
-        const expectScript = `
-spawn openclaw agents add ${agentName}
-expect "Workspace directory"
-send "\\r"
-expect "Configure model/auth"
-send "\\r"
-expect "Configure chat channels"
-send "\\r"
-expect "Select a channel"
-send "\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\x1b\\x5bB\\r"
-expect eof
-`;
-        const expectFile = `/tmp/create_agent_${agentName}.exp`;
-        fs.writeFileSync(expectFile, expectScript);
+        const workspacePath = path.join(getOpenClawHome(), `agents`, agentName);
+        // 确保 workspace 目录存在
+        if (!fs.existsSync(workspacePath)) {
+            fs.mkdirSync(workspacePath, { recursive: true });
+        }
         try {
-            const { stdout, stderr } = await execAsync(`expect ${expectFile}`, { timeout: 120000 });
-            fs.unlinkSync(expectFile);
-            if (stdout.includes('ready') || stdout.includes('Agent')) {
-                results.steps.push({ step: 1, name: 'create_agent', status: 'success' });
+            // 使用非交互模式创建 agent（不加 --bind，因为 wegirl 是自定义 channel）
+            const cmd = `openclaw agents add ${agentName} --non-interactive --workspace ${workspacePath} --model kimi-coding/k2p5 --json`;
+            const { stdout, stderr } = await execAsync(cmd, { timeout: 120000 });
+            const output = stdout || stderr;
+            ctx.logger.info(`[hr_manage] Create agent output: ${output}`);
+            // 检查输出中是否包含成功标志
+            if (output.includes('ready') || output.includes('Agent') || output.includes(agentName)) {
+                results.steps.push({ step: 1, name: 'create_agent', status: 'success', message: `Workspace: ${workspacePath}` });
             }
             else {
-                throw new Error(`Failed to create agent: ${stderr || stdout}`);
+                throw new Error(`Failed to create agent: ${output}`);
             }
         }
         catch (execErr) {
-            fs.unlinkSync(expectFile);
-            throw execErr;
+            // 如果 agent 已存在，可能是成功的
+            if (execErr.message?.includes('already exists') || execErr.stdout?.includes('already exists')) {
+                results.steps.push({ step: 1, name: 'create_agent', status: 'success', message: 'Agent already exists' });
+            }
+            else {
+                throw new Error(`Failed to create agent: ${execErr.message || execErr}`);
+            }
         }
         // Step 2: 更新 openclaw.json
         ctx.logger.info(`[hr_manage] Step 2: Updating openclaw.json...`);
@@ -100,7 +132,7 @@ expect eof
         };
         if (!config.bindings)
             config.bindings = [];
-        const bindingExists = config.bindings.some((b) => b.agentId === agentName && b.match?.accountId === accountId);
+        const bindingExists = config.bindings?.some((b) => b.agentId === agentName && b.match?.accountId === accountId) || false;
         if (!bindingExists) {
             config.bindings.push(binding);
         }
@@ -120,15 +152,16 @@ expect eof
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         results.metadata.configUpdated = true;
         results.steps.push({ step: 2, name: 'update_config', status: 'success' });
-        // Step 3: 注册到 Redis
+        // Step 3: 注册到 Redis (使用统一的 staff key)
         ctx.logger.info(`[hr_manage] Step 3: Registering to Redis...`);
         const KEY_PREFIX = 'wegirl:';
         const agentCapabilities = capabilities.length > 0 ? capabilities : [agentName, 'wegirl_send'];
-        await ctx.redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
-            agentId: accountId,
-            instanceId: instanceId,
+        // 使用 staff key 存储 agent 信息
+        await ctx.redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
+            staffId: accountId,
             type: 'agent',
-            role: role, // 职能/角色
+            instanceId: instanceId,
+            role: role,
             name: agentName,
             capabilities: agentCapabilities.join(','),
             status: 'online',
@@ -140,8 +173,10 @@ expect eof
         for (const cap of agentCapabilities) {
             await ctx.redis.sadd(`${KEY_PREFIX}capability:${cap}`, accountId);
         }
-        // 添加到实例集合
-        await ctx.redis.sadd(`${KEY_PREFIX}instance:${instanceId}:agents`, accountId);
+        // 添加到类型索引
+        await ctx.redis.sadd(`${KEY_PREFIX}staff:by-type:agent`, accountId);
+        // 添加到实例集合 (使用 staff 集合)
+        await ctx.redis.sadd(`${KEY_PREFIX}instance:${instanceId}:staff`, accountId);
         results.metadata.redisRegistered = true;
         results.steps.push({ step: 3, name: 'register_redis', status: 'success' });
         // Step 4: 发布到 Stream

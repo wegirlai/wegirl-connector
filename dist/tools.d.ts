@@ -7,6 +7,9 @@ interface WeGirlSendParams {
     chatId?: string;
     chatType?: string;
     from?: string;
+    replyChannel?: string;
+    replyAccountId?: string;
+    replyTo?: string;
 }
 export declare class WeGirlTools {
     private redis;
