@@ -476,49 +476,21 @@ async function handleListAgents(redis, logger) {
     const agents = await Promise.all(keys.map(async (key) => {
         const data = await redis.hgetall(key);
         const type = data.type || 'agent';
-        const lastHeartbeat = parseInt(data.lastHeartbeat || '0');
-        const now = Date.now();
-        const heartbeatAge = now - lastHeartbeat;
-        const isOnline = data.status === 'online' && heartbeatAge < 120000; // 2分钟内有心跳视为在线
         return {
             accountId: data.agentId,
             name: data.name,
             type: type,
             role: data.role || '-', // 职能/角色
             instanceId: data.instanceId,
-            status: isOnline ? 'online' : 'offline',
-            capabilities: data.capabilities?.split(',').filter(Boolean) || [],
-            lastHeartbeat: lastHeartbeat,
-            heartbeatAge: heartbeatAge,
-            load: {
-                active: parseInt(data['load:activeTasks'] || '0'),
-                pending: parseInt(data['load:pendingTasks'] || '0')
-            }
+            status: data.status,
+            capabilities: data.capabilities?.split(',') || [],
+            lastHeartbeat: data.lastHeartbeat
         };
     }));
-    // 过滤掉无效的，并按状态排序（在线在前）
-    const validAgents = agents
-        .filter(a => a.accountId)
-        .sort((a, b) => {
-        if (a.status === b.status)
-            return a.name.localeCompare(b.name);
-        return a.status === 'online' ? -1 : 1;
-    });
-    // 统计信息
-    const stats = {
-        total: validAgents.length,
-        online: validAgents.filter(a => a.status === 'online').length,
-        offline: validAgents.filter(a => a.status === 'offline').length,
-        byInstance: {}
-    };
-    validAgents.forEach(a => {
-        stats.byInstance[a.instanceId] = (stats.byInstance[a.instanceId] || 0) + 1;
-    });
     return {
         success: true,
-        timestamp: Date.now(),
-        stats: stats,
-        agents: validAgents
+        count: agents.length,
+        agents: agents.filter(a => a.accountId)
     };
 }
 /**
@@ -656,7 +628,7 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
     // 3. 注册新 agents
     for (const agent of toRegister) {
         const accountId = `${agent.name}-notifier`;
-        const agentCapabilities = [agent.name];
+        const agentCapabilities = [agent.name, 'wegirl_send'];
         await redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
             agentId: accountId,
             instanceId: instanceId,

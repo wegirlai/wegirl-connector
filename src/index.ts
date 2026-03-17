@@ -745,7 +745,7 @@ async function syncAgentsFromLocal(
   // 3. 注册新 agents
   for (const agent of toRegister) {
     const accountId = `${agent.name}-notifier`;
-    const agentCapabilities = [agent.name];
+    const agentCapabilities = [agent.name, 'wegirl_send'];
 
     await redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
       agentId: accountId,

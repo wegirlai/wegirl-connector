@@ -181,7 +181,7 @@ expect eof
     // Step 3: 注册到 Redis
     ctx.logger.info(`[hr_manage] Step 3: Registering to Redis...`);
     const KEY_PREFIX = 'wegirl:';
-    const agentCapabilities = capabilities.length > 0 ? capabilities : [agentName];
+    const agentCapabilities = capabilities.length > 0 ? capabilities : [agentName, 'wegirl_send'];
 
     await ctx.redis.hset(`${KEY_PREFIX}agents:${accountId}`, {
       agentId: accountId,
