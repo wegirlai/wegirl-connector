@@ -135,7 +135,7 @@ const plugin = {
                     properties: {
                         target: {
                             type: 'string',
-                            description: 'Target address, e.g., "default", "scout-notifier", "ou_xxx" (human user)'
+                            description: 'Target address, e.g., "default", "scout", "ou_xxx" (human user)'
                         },
                         message: {
                             type: 'string',
@@ -158,7 +158,7 @@ const plugin = {
             // HR Manage Tool - 仅限 HR Agent 使用
             context.registerTool({
                 name: 'hr_manage',
-                description: 'HR Agent 专用：创建和管理 OpenClaw Agents。使用场景：当用户需要创建新 agent 时，询问 agent名称即可调用。agent名称只能是英文字母、数字、横线(-)和下划线(_)，accountId 默认为 {agentName}-notifier，instanceId 默认为当前 HR 实例。',
+                description: 'HR Agent 专用：创建和管理 OpenClaw Agents。使用场景：当用户需要创建新 agent 时，询问 agent名称即可调用。agent名称只能是英文字母、数字、横线(-)和下划线(_)，accountId 默认为 {agentName}，instanceId 默认为当前 HR 实例。',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -173,7 +173,7 @@ const plugin = {
                         },
                         accountId: {
                             type: 'string',
-                            description: 'WeGirl account ID（如：sales-notifier）。默认值为 {agentName}-notifier'
+                            description: 'WeGirl account ID（如：sales）。默认值为 {agentName}'
                         },
                         instanceId: {
                             type: 'string',
@@ -217,8 +217,8 @@ const plugin = {
                             // 默认值处理
                             // instanceId 默认为当前实例（HR 所在实例）
                             instanceId = instanceId || INSTANCE_ID;
-                            // accountId 默认为 {agentName}-notifier
-                            accountId = accountId || `${agentName}-notifier`;
+                            // accountId 默认为 {agentName}
+                            accountId = accountId || `${agentName}`;
                             // role 默认为 '-'
                             role = role || '-';
                             result = await executeCreateAgent({
@@ -664,14 +664,14 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
     for (const localAgent of localAgents || []) {
         if (!localAgent?.name)
             continue;
-        const accountId = `${localAgent.name}-notifier`;
+        const accountId = `${localAgent.name}`;
         if (!redisAgentIds.includes(accountId)) {
             toRegister.push(localAgent);
         }
     }
     // 3. 注册新 agents (使用统一的 staff key)
     for (const agent of toRegister) {
-        const accountId = `${agent.name}-notifier`;
+        const accountId = `${agent.name}`;
         const agentCapabilities = [agent.name, 'wegirl_send'];
         await redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
             staffId: accountId,

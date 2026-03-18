@@ -113,15 +113,19 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
   try {
     // 1. 使用 resolveAgentRoute 查找 agent
-    const route = runtime.channel.routing.resolveAgentRoute({
+    // 关键：如果 chatId 为空，则不传入 peer 参数，避免影响路由判断
+    const resolveParams: any = {
       cfg,
       channel,
       accountId,
-      peer: {
+    };
+    if (chatId) {
+      resolveParams.peer = {
         kind: chatType as any,
         id: chatId,
-      },
-    });
+      };
+    }
+    const route = runtime.channel.routing.resolveAgentRoute(resolveParams);
 
     // 检查 route 是否为空
     if (!route || !route.agentId) {
@@ -215,7 +219,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
     // 创建 dispatcher，处理 Agent 回复
     // 当 channel="wegirl" 时，通过 outbound 发送；其他情况交由 Gateway 自动路由
-    const { dispatcher, replyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
+    const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
       deliver: async (payload: ReplyPayload, info: { kind: ReplyDispatchKind }) => {
         const text = payload.text ?? '';
         log?.debug?.(`[WeGirl SessionsSend] agent reply: kind=${info?.kind}, channel=${channel}, text=${text.substring(0, 50)}`);
@@ -260,10 +264,10 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               content: text,
               to: chatId,
               from: 'agent',
-              agentId: accountId, // 使用 accountId 标识发送者
+              agentId: accountId, // 发送者
               sessionId: sessionKey,
-              accountId: accountId,
-              status: replyStatus,  // 根据分析设置状态
+              accountId: accountId, // 发送者
+              status: replyStatus,
               isFinal: true,
               replyType: 'text',
               processedAt: Date.now(),
@@ -284,10 +288,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         }
 
         // ========== 单 agent 回复（原有逻辑）==========
-        // 只有 channel="wegirl" 时才通过 outbound 发送
+        // 只有 channel="wegirl" 或 originatingChannel="wegirl" 时才通过 outbound 发送
         // 其他 channel（如 feishu）由 Gateway 自动路由，不处理
-        if (channel !== 'wegirl') {
-          log?.debug?.(`[WeGirl SessionsSend] channel=${channel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
+        const effectiveChannel = originalMetadata?.originatingChannel || channel;
+        if (effectiveChannel !== 'wegirl') {
+          log?.debug?.(`[WeGirl SessionsSend] effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
           return;
         }
 
@@ -307,9 +312,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             content: text,
             to: chatId,
             from: 'agent',
-            agentId: accountId, // 使用 accountId（如 scout-notifier）而非 agentId（如 scout）
+            agentId: accountId, // 发送者（scout）
             sessionId: sessionKey,
-            accountId: accountId,
+            accountId: accountId, // 发送者（scout）
             status: 'completed',
             isFinal: true,
             replyType: 'text',
@@ -319,6 +324,22 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             error: undefined, // 预留：错误信息
             timestamp: Date.now(),
           };
+          log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
+          
+          // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
+          console.log('[WE_GIRL_REPLY_MESSAGE]', JSON.stringify(replyMessage, null, 2));
+          
+          // 写入文件以便查看真实数据
+          try {
+            const fs = require('fs');
+            const path = require('path');
+            const logPath = path.join(process.env.HOME || '/root', '.openclaw', 'wegirl-reply-debug.json');
+            fs.writeFileSync(logPath, JSON.stringify(replyMessage, null, 2));
+            log?.info?.(`[WeGirl SessionsSend] replyMessage written to ${logPath}`);
+          } catch (e: any) {
+            log?.error?.(`[WeGirl SessionsSend] Failed to write replyMessage:`, e.message);
+          }
+          
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
           log?.info?.(`[WeGirl SessionsSend] Reply published to wegirl:replies`);
         } catch (err: any) {
@@ -357,6 +378,12 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         log?.error?.(`[WeGirl SessionsSend] deliver error: ${error}`);
       },
     });
+
+    // 合并 replyOptions，添加模型设置
+    const replyOptions = {
+      ...baseReplyOptions,
+      model: 'kimi-coding/k2p5',
+    };
 
     // 调用 dispatchReplyFromConfig 发送消息给 Agent
     const result = await runtime.channel.reply.dispatchReplyFromConfig({

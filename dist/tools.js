@@ -1,7 +1,24 @@
 // src/tools.ts - wegirl_send 工具实现
 import { randomUUID } from 'crypto';
 import { wegirlSessionsSend } from './sessions-send.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 const KEY_PREFIX = 'wegirl:';
+// 缓存 openclaw.json 配置
+let openclawConfig = null;
+function loadOpenClawConfig() {
+    if (openclawConfig)
+        return openclawConfig;
+    try {
+        const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+        const content = readFileSync(configPath, 'utf-8');
+        openclawConfig = JSON.parse(content);
+        return openclawConfig;
+    }
+    catch (err) {
+        return null;
+    }
+}
 export class WeGirlTools {
     redis;
     logger;
@@ -239,28 +256,32 @@ export class WeGirlTools {
                 this.logger.info(`[WeGirlTools] Sending message: sender=${senderId}, target=${agentId}, replyTo=${replyTo}`);
                 // 使用 wegirlSessionsSend 发送消息给 agent
                 // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
-                wegirlSessionsSend({
-                    message: params.message,
-                    cfg: {
-                        channels: {
-                            wegirl: {
-                                accounts: {
-                                    [replyAccountId]: {
-                                        enabled: true,
-                                        redisUrl: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`
-                                    }
+                // 关键：chatId 设为空，避免 peer 影响路由判断
+                // 关键：accountId 应该是目标 agentId（如 scout），用于匹配 binding
+                // 关键：加载完整配置，包含 bindings
+                const fullCfg = loadOpenClawConfig() || {
+                    channels: {
+                        wegirl: {
+                            accounts: {
+                                [replyAccountId]: {
+                                    enabled: true,
+                                    redisUrl: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`
                                 }
                             }
                         }
-                    },
-                    channel: senderChannel,
-                    accountId: senderAccountId,
+                    }
+                };
+                wegirlSessionsSend({
+                    message: params.message,
+                    cfg: fullCfg, // 使用完整配置
+                    channel: 'wegirl', // 关键：强制使用 'wegirl' 确保回复能正确路由
+                    accountId: agentId, // 关键：使用目标 agentId（scout），不是 senderAccountId
                     from: senderId,
-                    chatId: agentId,
-                    chatType: params.chatType || 'direct',
+                    chatId: '', // 关键：设为空，避免 peer 影响路由
+                    chatType: 'direct', // 使用 direct 避免 group 路由
                     // 关键：设置 metadata，让回复能路由回发送者
                     metadata: {
-                        originatingChannel: replyChannel,
+                        originatingChannel: replyChannel, // 实际回复目标 channel
                         originatingTo: replyTo,
                         originatingAccountId: replyAccountId,
                         replyTo: replyTo,
