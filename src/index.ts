@@ -190,13 +190,13 @@ const plugin = {
       // HR Manage Tool - 仅限 HR Agent 使用
       context.registerTool({
         name: 'hr_manage',
-        description: 'HR Agent 专用：创建和管理 OpenClaw Agents。使用场景：当用户需要创建新 agent 时，询问 agent名称即可调用。agent名称只能是英文字母、数字、横线(-)和下划线(_)，accountId 默认为 {agentName}，instanceId 默认为当前 HR 实例。',
+        description: 'HR Agent 专用：创建和管理 OpenClaw Agents，以及同步 agents 到 Redis。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
         parameters: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-              enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent'],
+              enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis'],
               description: '操作类型'
             },
             agentName: {
@@ -282,6 +282,9 @@ const plugin = {
               break;
             case 'delete_agent':
               result = await handleDeleteAgent(params, redisClient, logger);
+              break;
+            case 'sync_agents_to_redis':
+              result = await handleSyncAgents(redisClient, logger);
               break;
             default:
               throw new Error(`未知操作: ${action}`);
@@ -661,12 +664,36 @@ async function handleDeleteAgent(args: any, redis: Redis, logger: any): Promise<
   };
 }
 
+/**
+ * 手动同步所有本地 Agents 到 Redis
+ */
+async function handleSyncAgents(redis: Redis, logger: any): Promise<any> {
+  const INSTANCE_ID = process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+  logger.info(`[hr_manage] Starting manual agent sync to Redis for instance: ${INSTANCE_ID}`);
+
+  try {
+    const result = await syncAgentsFromLocal(INSTANCE_ID, redis, logger);
+    return {
+      success: true,
+      message: `同步完成: ${result.kept} 个保持, ${result.removed} 个清理, 新增 ${result.registered || 0} 个`,
+      details: result
+    };
+  } catch (err: any) {
+    logger.error('[hr_manage] Sync failed:', err.message);
+    return {
+      success: false,
+      message: `同步失败: ${err.message}`
+    };
+  }
+}
+
 // ============ Agent 同步与清理 ============
 
 interface SyncResult {
   kept: number;
   removed: number;
   removedIds: string[];
+  registered?: number;
 }
 
 // 获取本地所有 agents（从配置文件读取）
@@ -831,7 +858,8 @@ async function syncAgentsFromLocal(
   return {
     kept: toKeep.length,
     removed: toRemove.length,
-    removedIds: toRemove
+    removedIds: toRemove,
+    registered: toRegister.length
   };
 }
 

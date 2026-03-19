@@ -104,17 +104,35 @@ export function registerEventHandlers(ctx: EventHandlerContext): void {
   // Tool 调用前
   context.on('before_tool_call', (event: any) => {
     const toolName = event?.toolName || 'unknown';
-    const command = event?.params?.command || 'N/A';
-    logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (command: ${command})`);
+    const params = event?.params || {};
+    
+    // 提取文件路径（针对 read/edit 工具）
+    let target = 'N/A';
+    if (toolName === 'read' || toolName === 'edit') {
+      target = params.file_path || params.path || params.filePath || 'N/A';
+    } else {
+      target = params.command || 'N/A';
+    }
+    
+    logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (target: ${target})`);
     persistEvent('before_tool_call', event, ctx);
   });
 
   // Tool 调用后
   context.on('after_tool_call', (event: any) => {
     const toolName = event?.toolName || 'unknown';
-    const command = event?.params?.command || 'N/A';
+    const params = event?.params || {};
     const duration = event?.durationMs || 'unknown';
-    logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (command: ${command}, ${duration}ms)`);
+    
+    // 提取文件路径（针对 read/edit 工具）
+    let target = 'N/A';
+    if (toolName === 'read' || toolName === 'edit') {
+      target = params.file_path || params.path || params.filePath || 'N/A';
+    } else {
+      target = params.command || 'N/A';
+    }
+    
+    logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (target: ${target}, ${duration}ms)`);
     persistEvent('after_tool_call', event, ctx);
   });
 

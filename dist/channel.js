@@ -80,12 +80,16 @@ export const wegirlPlugin = {
                     || process.env.OPENCLAW_INSTANCE_ID
                     || 'instance-local';
                 log.info(`[WeGirl Channel] Starting: ${id} (instance: ${instanceId})`);
-                const redisUrl = account?.redisUrl || 'redis://localhost:6379';
-                // 优先从 plugin config 读取密码，其次从 account，最后环境变量
+                // 优先从 plugin config 读取，其次从 account，最后默认 localhost
+                const redisUrl = cfg?.plugins?.entries?.wegirl?.config?.redisUrl
+                    || account?.redisUrl
+                    || 'redis://localhost:6379';
                 const password = cfg?.plugins?.entries?.wegirl?.config?.redisPassword
                     || account?.redisPassword
                     || process.env.REDIS_PASSWORD;
-                const db = account?.redisDb || cfg?.plugins?.entries?.wegirl?.config?.redisDb || 1;
+                const db = cfg?.plugins?.entries?.wegirl?.config?.redisDb
+                    || account?.redisDb
+                    || 1;
                 const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
                 const consumerGroup = 'wegirl-consumers';
                 // 使用 accountId + instanceId 作为唯一 consumer 名称，避免多个 account 互相覆盖
@@ -98,35 +102,48 @@ export const wegirlPlugin = {
                 const publisher = new Redis(redisUrl, redisOptions);
                 streamClient.on('error', (err) => log.error('[WeGirl] stream error:', err.message));
                 publisher.on('error', (err) => log.error('[WeGirl] publisher error:', err.message));
-                // 等待连接就绪
-                await Promise.all([
+                // 异步等待连接就绪（不阻塞 CLI 命令）
+                let connectionsReady = false;
+                const connectPromise = Promise.all([
                     new Promise((resolve, reject) => {
                         streamClient.once('ready', resolve);
-                        streamClient.once('error', reject);
+                        streamClient.once('error', (err) => reject(new Error(`streamClient: ${err.message}`)));
                         setTimeout(() => reject(new Error('streamClient connect timeout')), 10000);
                     }),
                     new Promise((resolve, reject) => {
                         publisher.once('ready', resolve);
-                        publisher.once('error', reject);
+                        publisher.once('error', (err) => reject(new Error(`publisher: ${err.message}`)));
                         setTimeout(() => reject(new Error('publisher connect timeout')), 10000);
                     })
-                ]);
-                log.info('[WeGirl Channel] Redis connections ready');
-                setWeGirlPublisher(publisher);
-                // 创建消费者组（如果不存在）
-                try {
-                    await streamClient.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
-                    log.info(`[WeGirl Channel] Created consumer group: ${consumerGroup}`);
-                }
-                catch (err) {
-                    // 组已存在会报错，忽略
-                    if (!err.message?.includes('already exists')) {
-                        log.error('[WeGirl Channel] Failed to create consumer group:', err.message);
+                ]).then(() => {
+                    connectionsReady = true;
+                    log.info('[WeGirl Channel] Redis connections ready');
+                    setWeGirlPublisher(publisher);
+                }).catch((err) => {
+                    log.error('[WeGirl Channel] Redis connection failed:', err.message);
+                    // 不抛出错误，让 consumer 循环处理重连
+                });
+                // 创建消费者组（如果不存在）- 在连接就绪后执行
+                const setupConsumerGroup = async () => {
+                    await connectPromise;
+                    if (!connectionsReady) {
+                        log.warn('[WeGirl Channel] Skipping consumer group setup - Redis not connected');
+                        return;
                     }
-                    else {
-                        log.info(`[WeGirl Channel] Consumer group exists: ${consumerGroup}`);
+                    try {
+                        await streamClient.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
+                        log.info(`[WeGirl Channel] Created consumer group: ${consumerGroup}`);
                     }
-                }
+                    catch (err) {
+                        // 组已存在会报错，忽略
+                        if (!err.message?.includes('already exists')) {
+                            log.error('[WeGirl Channel] Failed to create consumer group:', err.message);
+                        }
+                        else {
+                            log.info(`[WeGirl Channel] Consumer group exists: ${consumerGroup}`);
+                        }
+                    }
+                };
                 // 消息处理函数
                 const handleMessage = async (data) => {
                     try {
@@ -163,6 +180,14 @@ export const wegirlPlugin = {
                     }
                 }, ERROR_RESET_INTERVAL);
                 const consumeStream = async () => {
+                    // 先等待连接就绪
+                    await connectPromise;
+                    if (!connectionsReady) {
+                        log.error('[WeGirl Channel] Cannot start consumer - Redis connection failed');
+                        return;
+                    }
+                    // 确保消费者组已创建
+                    await setupConsumerGroup();
                     while (running && !abortSignal.aborted) {
                         try {
                             // XREADGROUP: 从消费者组读取消息

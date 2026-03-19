@@ -21,7 +21,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "ioredis": "^5.4.0"
+    "ioredis": "^5.10.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
