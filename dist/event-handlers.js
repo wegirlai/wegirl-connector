@@ -76,10 +76,10 @@ export function registerEventHandlers(ctx) {
     context.on('before_tool_call', (event) => {
         const toolName = event?.toolName || 'unknown';
         const params = event?.params || {};
-        // 提取文件路径（针对 read/edit 工具）
+        // 提取文件路径（针对 read/edit/write 工具）
         let target = 'N/A';
-        if (toolName === 'read' || toolName === 'edit') {
-            target = params.file_path || params.path || params.filePath || 'N/A';
+        if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
+            target = params.file_path || params.path || params.filePath || params.newText || 'N/A';
         }
         else {
             target = params.command || 'N/A';
@@ -92,10 +92,10 @@ export function registerEventHandlers(ctx) {
         const toolName = event?.toolName || 'unknown';
         const params = event?.params || {};
         const duration = event?.durationMs || 'unknown';
-        // 提取文件路径（针对 read/edit 工具）
+        // 提取文件路径（针对 read/edit/write 工具）
         let target = 'N/A';
-        if (toolName === 'read' || toolName === 'edit') {
-            target = params.file_path || params.path || params.filePath || 'N/A';
+        if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
+            target = params.file_path || params.path || params.filePath || params.newText || 'N/A';
         }
         else {
             target = params.command || 'N/A';

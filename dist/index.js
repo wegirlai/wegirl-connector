@@ -39,10 +39,24 @@ const plugin = {
             if (redisConnectPromise)
                 return redisConnectPromise;
             redisConnectPromise = (async () => {
+                // 优先从环境变量读取，其次 pluginConfig，最后默认值
                 const config = pluginConfig || {};
-                const db = config.redisDb ?? 0;
-                const url = config.redisUrl || 'redis://localhost:6379';
-                logger.info(`[WeGirl] Redis URL: ${url}, db: ${db}`);
+                const db = (parseInt(process.env.REDIS_DB || '') || config.redisDb) ?? 1;
+                const password = process.env.REDIS_PASSWORD || config.redisPassword;
+                // 构建 Redis URL：优先使用环境变量或完整配置
+                let url;
+                if (process.env.REDIS_URL) {
+                    url = process.env.REDIS_URL;
+                }
+                else if (process.env.REDIS_HOST) {
+                    const host = process.env.REDIS_HOST;
+                    const port = process.env.REDIS_PORT || '6379';
+                    url = `redis://${host}:${port}`;
+                }
+                else {
+                    url = config.redisUrl || 'redis://localhost:6379';
+                }
+                logger.info(`[WeGirl] Redis URL: ${url.replace(/:\/\/.*@/, '://***@')}, db: ${db}`);
                 const redisOptions = {
                     db,
                     retryStrategy: (times) => {
@@ -57,8 +71,8 @@ const plugin = {
                     connectTimeout: 10000,
                     maxRetriesPerRequest: 3,
                 };
-                if (config.redisPassword) {
-                    redisOptions.password = config.redisPassword;
+                if (password) {
+                    redisOptions.password = password;
                 }
                 redisClient = new Redis(url, redisOptions);
                 // 等待连接就绪
