@@ -17,6 +17,59 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
               wegirl_send (Tool)
 ```
 
+---
+
+## 📌 里程碑
+
+### v2.0 (2026-03-21) ⭐ Current
+
+**架构升级**:
+- ✅ 统一 StaffId 抽象（人类和 Agent 统一标识）
+- ✅ 新接口语义：flowType/source/target
+- ✅ `wegirl_send` 成为主接口（原接口改为 `wegirl_send_v1` 废弃）
+- ✅ 移除 V1 格式支持，仅保留 V2 格式
+
+**消息流支持**:
+- ✅ H2A (Human→Agent) - 人类向 Agent 发送消息
+- ✅ A2A (Agent→Agent) - Agent 间通信
+- ✅ A2H (Agent→Human) - Agent 向人类回复
+
+**HR 入职流程**:
+- ✅ 未绑定人类使用 openId 作为临时 staffId
+- ✅ `hr_manage` 工具处理入职登记
+- ✅ 自动生成入职登记表单
+
+**Bug 修复**:
+- ✅ replyTo 解析支持字符串 open_id
+- ✅ 为所有 Agent 配置 anthropic auth profile
+
+---
+
+### v1.0.2 (2026-03-19)
+
+**配置优化**:
+- ✅ Redis 配置优先级（环境变量 > pluginConfig > 默认值）
+- ✅ Event Handlers 支持 `write` 工具文件路径提取
+
+---
+
+### v1.0.1 (2026-03-19)
+
+**Bug 修复**:
+- ✅ Redis 连接配置修复
+- ✅ HR Manage 工具新增 `sync_agents_to_redis` action
+
+---
+
+### v1.0 (2026-03-17)
+
+**基础架构**:
+- ✅ Agent 注册与心跳机制
+- ✅ Redis Stream 跨实例通信
+- ✅ Consumer Group 消费组管理
+
+---
+
 ## 安装
 
 ```bash
