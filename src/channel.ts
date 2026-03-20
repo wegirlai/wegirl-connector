@@ -88,17 +88,17 @@ export const wegirlPlugin = {
           || process.env.OPENCLAW_INSTANCE_ID
           || 'instance-local';
 
-        log.info(`[WeGirl Channel] Starting: ${id} (instance: ${instanceId})`);
+        log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
 
         // 优先从 plugin config 读取，其次从 account，最后默认 localhost
-        const redisUrl = cfg?.plugins?.entries?.wegirl?.config?.redisUrl 
-          || account?.redisUrl 
+        const redisUrl = cfg?.plugins?.entries?.wegirl?.config?.redisUrl
+          || account?.redisUrl
           || 'redis://localhost:6379';
-        const password = cfg?.plugins?.entries?.wegirl?.config?.redisPassword 
-          || account?.redisPassword 
+        const password = cfg?.plugins?.entries?.wegirl?.config?.redisPassword
+          || account?.redisPassword
           || process.env.REDIS_PASSWORD;
-        const db = cfg?.plugins?.entries?.wegirl?.config?.redisDb 
-          || account?.redisDb 
+        const db = cfg?.plugins?.entries?.wegirl?.config?.redisDb
+          || account?.redisDb
           || 1;
         const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
         const consumerGroup = 'wegirl-consumers';
@@ -141,18 +141,18 @@ export const wegirlPlugin = {
         const setupConsumerGroup = async () => {
           await connectPromise;
           if (!connectionsReady) {
-            log.warn('[WeGirl Channel] Skipping consumer group setup - Redis not connected');
+            log.warn(`[WeGirl Channel]<${id}> Skipping consumer group setup - Redis not connected`);
             return;
           }
           try {
             await streamClient.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
-            log.info(`[WeGirl Channel] Created consumer group: ${consumerGroup}`);
+            log.info(`[WeGirl Channel]<${id}> Created consumer group:,${consumerGroup}`);
           } catch (err: any) {
             // 组已存在会报错，忽略
             if (!err.message?.includes('already exists')) {
-              log.error('[WeGirl Channel] Failed to create consumer group:', err.message);
+              log.error(`[WeGirl Channel]<${id}> Failed to create consumer group: ${err.message}`);
             } else {
-              log.info(`[WeGirl Channel] Consumer group exists: ${consumerGroup}`);
+              log.info(`[WeGirl Channel]<${id}> Consumer group exists: ${consumerGroup}`);
             }
           }
         };
@@ -174,9 +174,9 @@ export const wegirlPlugin = {
               agentCount: data.agentCount,
               currentAgentId: data.currentAgentId,
             });
-            log.info(`[WeGirl Channel] Message delivered from stream: ${data.routingId || 'unknown'}`);
+            log.info(`[WeGirl Channel]<${id}> Message delivered from stream: ${data.routingId || 'unknown'}`);
           } catch (err: any) {
-            log.error('[WeGirl Channel] Failed to dispatch:', err.message);
+            log.error(`[WeGirl Channel]<${id}> Failed to dispatch:${err.message}`);
           }
         };
 
@@ -185,7 +185,7 @@ export const wegirlPlugin = {
         let consecutiveErrors = 0;
         const MAX_CONSECUTIVE_ERRORS = 10;
         const ERROR_RESET_INTERVAL = 60000; // 60秒后重置错误计数
-        
+
         // 定时重置错误计数
         const errorResetTimer = setInterval(() => {
           if (consecutiveErrors > 0) {
@@ -198,13 +198,13 @@ export const wegirlPlugin = {
           // 先等待连接就绪
           await connectPromise;
           if (!connectionsReady) {
-            log.error('[WeGirl Channel] Cannot start consumer - Redis connection failed');
+            log.error(`[WeGirl Channel]<${id}> Cannot start consumer - Redis connection failed`);
             return;
           }
-          
+
           // 确保消费者组已创建
           await setupConsumerGroup();
-          
+
           while (running && !abortSignal.aborted) {
             try {
               // XREADGROUP: 从消费者组读取消息
@@ -239,7 +239,7 @@ export const wegirlPlugin = {
                       // 添加超时控制，防止处理卡住
                       await Promise.race([
                         handleMessage(data),
-                        new Promise((_, reject) => 
+                        new Promise((_, reject) =>
                           setTimeout(() => reject(new Error('Message handling timeout')), 60000)
                         )
                       ]);
@@ -247,22 +247,22 @@ export const wegirlPlugin = {
 
                     // ACK 消息（确认已处理）
                     await streamClient.xack(streamKey, consumerGroup, messageId);
-                    log.debug(`[WeGirl Channel] Message ACKed: ${messageId}`);
+                    log.debug(`[WeGirl Channel]<${id}> Message ACKed: ${messageId}`);
                   } catch (err: any) {
-                    log.error(`[WeGirl Channel] Failed to process message ${messageId}:`, err.message);
+                    log.error(`[WeGirl Channel]<${id}> Failed to process message ${messageId}:`, err.message);
                     // 处理失败也要 ACK，避免消息无限重试
                     try {
                       await streamClient.xack(streamKey, consumerGroup, messageId);
-                      log.debug(`[WeGirl Channel] Message ACKed after error: ${messageId}`);
+                      log.debug(`[WeGirl Channel]<${id}> Message ACKed after error: ${messageId}`);
                     } catch (ackErr: any) {
-                      log.error(`[WeGirl Channel] Failed to ACK message ${messageId}:`, ackErr.message);
+                      log.error(`[WeGirl Channel]<${id}> Failed to ACK message ${messageId}:`, ackErr.message);
                     }
                   }
                 }
               }
             } catch (err: any) {
               consecutiveErrors++;
-              
+
               if (err.message?.includes('Connection') || err.message?.includes('ECONNREFUSED')) {
                 log.error(`[WeGirl Channel] Redis connection error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), retrying in ${Math.min(consecutiveErrors * 2, 30)}s...`);
                 await sleep(Math.min(consecutiveErrors * 2000, 30000));
@@ -300,7 +300,7 @@ export const wegirlPlugin = {
           consumeError = err;
           log.error('[WeGirl Channel] Consumer promise rejected:', err.message);
         });
-        
+
         log.info(`[WeGirl Channel] Stream consumer started: ${streamKey}`);
         setStatus({ running: true });
 
