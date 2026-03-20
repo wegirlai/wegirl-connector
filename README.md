@@ -34,6 +34,12 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ A2A (Agent→Agent) - Agent 间通信
 - ✅ A2H (Agent→Human) - Agent 向人类回复
 
+**replyTo 路由设计**:
+- ✅ 默认行为：`replyTo = source`（谁发消息，回复给谁）
+- ✅ 显式指定：支持任务委派、客服转接、代理汇总、上级抄送等场景
+
+详见 [replyTo 行为定义](#replyto-行为定义)
+
 **HR 入职流程**:
 - ✅ 未绑定人类使用 openId 作为临时 staffId
 - ✅ `hr_manage` 工具处理入职登记
@@ -141,3 +147,59 @@ npm run build
 ## License
 
 MIT
+
+---
+
+## replyTo 行为定义
+
+### 默认行为（replyTo = source）
+
+| 场景 | 流向 | 说明 |
+|------|------|------|
+| H2A 默认 | `tiger → scout` | scout 回复给 tiger，正常交互 |
+| A2A 默认 | `hr → scout` | scout 回复给 hr，任务反馈 |
+
+### 显式指定场景
+
+| 场景 | 流向 | replyTo | 说明 |
+|------|------|---------|------|
+| **任务委派** | `hr → scout` | `quartermaster` | hr 让 scout 分析，结果给 quartermaster 汇总 |
+| **客服转接** | `support → engineer` | `user` | support 转技术问题给 engineer，但回复给 user |
+| **代理汇总** | `user → scout` | `analyst` | scout 收集 URL，结果给 analyst 分析 |
+| **上级抄送** | `staff → assistant` | `manager` | staff 让 assistant 做事，同时抄送 manager |
+
+### 特殊值
+
+- **`NO_REPLY`** - 不期望回复（广播通知场景）
+- **数组** - 多个回复目标 `["user", "manager"]`
+
+### 代码示例
+
+```javascript
+// 任务委派：hr 让 scout 收集，结果给 quartermaster
+wegirl_send({
+  flowType: "A2A",
+  source: "hr",
+  target: "scout",
+  message: "收集 example.com 的所有 URL",
+  replyTo: "quartermaster"  // 显式指定回复给 quartermaster
+});
+
+// 客服转接：support 把问题转给 engineer，但回复给 user
+wegirl_send({
+  flowType: "A2A",
+  source: "support",
+  target: "engineer",
+  message: "用户遇到技术问题...",
+  replyTo: "ou_user_openid"  // 回复给原始用户
+});
+
+// 广播通知：不需要回复
+wegirl_send({
+  flowType: "A2A",
+  source: "hr",
+  target: "all",
+  message: "系统维护通知",
+  replyTo: "NO_REPLY"
+});
+```
