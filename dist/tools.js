@@ -271,14 +271,18 @@ export class WeGirlTools {
                         }
                     }
                 };
+                // 关键：私聊调用其他 agent 时，清空 chatId 触发广播模式
+                // 群聊时保留 chatId，让回复回到群里
+                const isGroupChat = params.chatType === 'group';
+                const effectiveChatId = isGroupChat ? (params.chatId || '') : '';
                 wegirlSessionsSend({
                     message: params.message,
                     cfg: fullCfg, // 使用完整配置
                     channel: 'wegirl', // 关键：强制使用 'wegirl' 确保回复能正确路由
                     accountId: agentId, // 关键：使用目标 agentId（scout），不是 senderAccountId
                     from: senderId,
-                    chatId: '', // 关键：设为空，避免 peer 影响路由
-                    chatType: 'direct', // 使用 direct 避免 group 路由
+                    chatId: effectiveChatId, // 群聊保留，私聊清空触发广播
+                    chatType: params.chatType || 'direct', // 使用 direct 避免 group 路由
                     // 关键：设置 metadata，让回复能路由回发送者
                     metadata: {
                         originatingChannel: replyChannel, // 实际回复目标 channel
@@ -306,13 +310,16 @@ export class WeGirlTools {
             }
         }
         // 跨实例：通过 Redis Stream 发布（持久化）
+        // 关键：私聊调用其他 agent 时，清空 chatId 触发广播模式
+        const isGroupChatRemote = params.chatType === 'group';
+        const effectiveChatIdRemote = isGroupChatRemote ? (params.chatId || '') : '';
         const streamKey = `${KEY_PREFIX}stream:instance:${targetInstanceId}`;
         const deliveryParams = {
             routingId,
             message: params.message,
             channel: params.channel || 'wegirl',
             accountId: params.accountId || 'default',
-            chatId: params.chatId,
+            chatId: effectiveChatIdRemote, // 群聊保留，私聊清空触发广播
             chatType: params.chatType || 'direct',
             from: envelope.from.agentId,
             targetType: 'agent',

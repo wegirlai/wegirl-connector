@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime } from './runtime.js';
 import { Registry } from './registry.js';
@@ -7,6 +8,7 @@ import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers } from './event-handlers.js';
 import { executeCreateAgent } from './hr-manage-core.js';
+import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 // 模块实例
 let redisClient = null;
 let redisConnectPromise = null;
@@ -172,13 +174,13 @@ const plugin = {
             // HR Manage Tool - 仅限 HR Agent 使用
             context.registerTool({
                 name: 'hr_manage',
-                description: 'HR Agent 专用：创建和管理 OpenClaw Agents，以及同步 agents 到 Redis。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
+                description: 'HR Agent 专用：创建和管理 OpenClaw Agents，同步 agents 到 Redis，以及处理飞书消息。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis；4) 处理飞书消息使用 process_message。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
                 parameters: {
                     type: 'object',
                     properties: {
                         action: {
                             type: 'string',
-                            enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis'],
+                            enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis', 'send_command', 'process_message'],
                             description: '操作类型'
                         },
                         agentName: {
@@ -203,6 +205,19 @@ const plugin = {
                             type: 'string',
                             description: '职能/角色（如：销售专员、技术支持）',
                             default: '-'
+                        },
+                        command: {
+                            type: 'string',
+                            enum: ['onboard_user', 'update_user', 'sync_agents', 'notify_user'],
+                            description: '命令类型（send_command 时使用）'
+                        },
+                        payload: {
+                            type: 'object',
+                            description: '命令参数（send_command 时使用）'
+                        },
+                        message: {
+                            type: 'object',
+                            description: '飞书消息数据（process_message 时使用）'
                         }
                     },
                     required: ['action']
@@ -260,6 +275,22 @@ const plugin = {
                         case 'sync_agents_to_redis':
                             result = await handleSyncAgents(redisClient, logger);
                             break;
+                        case 'send_command': {
+                            const { command, payload: cmdPayload } = params;
+                            if (!command) {
+                                throw new Error('缺少必填参数: command');
+                            }
+                            result = await handleSendCommand({ command, payload: cmdPayload || {} }, redisClient, logger, INSTANCE_ID);
+                            break;
+                        }
+                        case 'process_message': {
+                            const { message } = params;
+                            if (!message) {
+                                throw new Error('缺少必填参数: message');
+                            }
+                            result = await handleProcessMessage(message, redisClient, logger, INSTANCE_ID);
+                            break;
+                        }
                         default:
                             throw new Error(`未知操作: ${action}`);
                     }
@@ -598,10 +629,26 @@ async function handleDeleteAgent(args, redis, logger) {
     };
 }
 /**
+ * 从 openclaw.json 读取 instanceId
+ */
+function getInstanceIdFromConfig(logger) {
+    try {
+        const configPath = getOpenClawConfigPath();
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const instanceId = config.plugins?.wegirl?.config?.instanceId || 'instance-local';
+        logger?.info?.(`[hr_manage] Got instanceId from openclaw.json: ${instanceId}`);
+        return instanceId;
+    }
+    catch (err) {
+        logger?.error?.(`[hr_manage] Failed to read instanceId from config: ${err.message}`);
+        return process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+    }
+}
+/**
  * 手动同步所有本地 Agents 到 Redis
  */
 async function handleSyncAgents(redis, logger) {
-    const INSTANCE_ID = process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+    const INSTANCE_ID = getInstanceIdFromConfig(logger);
     logger.info(`[hr_manage] Starting manual agent sync to Redis for instance: ${INSTANCE_ID}`);
     try {
         const result = await syncAgentsFromLocal(INSTANCE_ID, redis, logger);
@@ -744,6 +791,98 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         removed: toRemove.length,
         removedIds: toRemove,
         registered: toRegister.length
+    };
+}
+/**
+ * 发送 HR 命令到 wegirl:replies channel
+ * wegirl-service 会根据消息类型处理这些命令
+ */
+async function handleSendCommand(args, redis, logger, instanceId) {
+    const { command, payload } = args;
+    logger.info(`[hr_manage:send_command] Sending command: ${command}`);
+    // 构建消息
+    const message = {
+        type: 'hr_command',
+        command: command,
+        payload: payload,
+        fromAgent: 'hr',
+        instanceId: instanceId,
+        timestamp: Date.now(),
+        routingId: randomUUID(),
+    };
+    try {
+        // 发布到 wegirl:replies channel
+        await redis.publish('wegirl:replies', JSON.stringify(message));
+        logger.info(`[hr_manage:send_command] Command sent to wegirl:replies: ${command}`);
+        return {
+            success: true,
+            command: command,
+            message: `命令 ${command} 已发送到 wegirl:replies`,
+            payload: payload
+        };
+    }
+    catch (err) {
+        logger.error(`[hr_manage:send_command] Failed to send command: ${err.message}`);
+        throw new Error(`发送命令失败: ${err.message}`);
+    }
+}
+/**
+ * 处理飞书消息
+ * 根据消息类型（私聊/群聊@）判断并发送相应命令
+ */
+async function handleProcessMessage(message, redis, logger, instanceId) {
+    logger.info(`[hr_manage:process_message] Processing message`);
+    const chatType = message.chatType || message.chat_type;
+    const fromUser = message.from;
+    const senderName = message.senderName || message.fromUserName;
+    const mentions = message.mentions || message.metadata?.mentions || [];
+    // 1. 私聊消息 → 直接建立人类员工
+    if (chatType === 'p2p') {
+        logger.info(`[hr_manage:process_message] Private message from ${fromUser}`);
+        await handlePrivateMessage(fromUser, senderName, message.fromUserOpenId, redis, logger, instanceId);
+        return {
+            success: true,
+            action: 'onboard_human',
+            userId: fromUser,
+            message: '私聊消息已处理，人类员工入职命令已发送'
+        };
+    }
+    // 2. 群聊 @ 消息 → 判断是 agent 还是人类
+    if (chatType === 'group' && mentions && mentions.length > 0) {
+        logger.info(`[hr_manage:process_message] Group mention message with ${mentions.length} mentions`);
+        const results = [];
+        for (const mention of mentions) {
+            const mentionKey = mention.key || mention;
+            const mentionId = mention.id || mention;
+            const mentionName = mention.name || mention;
+            const context = {
+                mentionKey,
+                mentionId,
+                mentionName,
+                chatId: message.chatId,
+                chatType: chatType,
+                fromUser: fromUser,
+                senderName: senderName,
+            };
+            await handleMentionMessage(context, redis, logger, instanceId);
+            results.push({
+                mention: mentionId || mentionKey,
+                processed: true
+            });
+        }
+        return {
+            success: true,
+            action: 'process_mentions',
+            count: mentions.length,
+            results: results,
+            message: `群聊@消息已处理，共 ${mentions.length} 个提及`
+        };
+    }
+    // 其他消息类型
+    return {
+        success: true,
+        action: 'none',
+        message: '消息无需特殊处理'
     };
 }
 export default plugin;
