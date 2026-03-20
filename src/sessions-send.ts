@@ -172,9 +172,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         timestamp: Date.now()
       };
       await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
-      log?.info?.(`[WeGirl SessionsSend] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}`);
+      log?.info?.(`[WeGirl SessionsSend forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}`);
     } catch (err: any) {
-      log?.error?.('[WeGirl SessionsSend] Redis forward failed:', err.message);
+      log?.error?.('[WeGirl SessionsSend forward] Redis forward failed:', err.message);
     }
 
     // 3. 构建 envelope
@@ -234,14 +234,14 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         if (chatType === 'group' && taskId && agentCount && agentCount > 1) {
           const effectiveAgentId = currentAgentId || agentId;
           log?.info?.(`[WeGirl SessionsSend] Group multi-agent reply: taskId=${taskId}, agent=${effectiveAgentId}`);
-          
+
           try {
             const pub = await getRedisPublisher(cfg);
             if (!pub) {
               log?.error?.(`[WeGirl SessionsSend] Redis publisher not connected`);
               return;
             }
-            
+
             // 分析回复内容确定状态
             let replyStatus: string;
             if (text.startsWith('NO_REPLY') || text.trim() === '') {
@@ -253,7 +253,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             } else {
               replyStatus = 'completed';  // 正常完成
             }
-            
+
             // 直接发送当前 agent 的回复（不聚合）
             const replyId = `wegirl-reply-${Date.now()}`;
             const replyMessage = {
@@ -279,7 +279,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             };
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
             log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${accountId}`);
-            
+
             return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
             log?.error?.(`[WeGirl SessionsSend] Group reply failed:`, err.message);
@@ -296,11 +296,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           return;
         }
 
-        log?.info?.(`[WeGirl SessionsSend] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
+        log?.info?.(`[WeGirl SessionsSend replies] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
         try {
           const pub = await getRedisPublisher(cfg);
           if (!pub) {
-            log?.error?.(`[WeGirl SessionsSend] Redis publisher not connected`);
+            log?.error?.(`[WeGirl SessionsSend replies] Redis publisher not connected`);
             return;
           }
           const replyId = `wegirl-reply-${Date.now()}`;
@@ -324,24 +324,24 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             error: undefined, // 预留：错误信息
             timestamp: Date.now(),
           };
-          log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
-          
+          //log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
+
           // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
-          console.log('[WE_GIRL_REPLY_MESSAGE]', JSON.stringify(replyMessage, null, 2));
-          
+          console.log('[WeGirl SessionsSend replies]', JSON.stringify(replyMessage, null, 2));
+
           // 写入文件以便查看真实数据
           try {
             const fs = require('fs');
             const path = require('path');
             const logPath = path.join(process.env.HOME || '/root', '.openclaw', 'wegirl-reply-debug.json');
             fs.writeFileSync(logPath, JSON.stringify(replyMessage, null, 2));
-            log?.info?.(`[WeGirl SessionsSend] replyMessage written to ${logPath}`);
+            log?.info?.(`[WeGirl SessionsSend replies] replyMessage written to ${logPath}`);
           } catch (e: any) {
-            log?.error?.(`[WeGirl SessionsSend] Failed to write replyMessage:`, e.message);
+            log?.error?.(`[WeGirl SessionsSend replies] Failed to write replyMessage:`, e.message);
           }
-          
+
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-          log?.info?.(`[WeGirl SessionsSend] Reply published to wegirl:replies`);
+          log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies`);
         } catch (err: any) {
           // 发送失败，发布错误回复
           try {
@@ -370,8 +370,8 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               };
               await pub.publish('wegirl:replies', JSON.stringify(errorReply));
             }
-          } catch {}
-          log?.error?.(`[WeGirl SessionsSend] Failed to publish reply: ${err.message}`);
+          } catch { }
+          log?.error?.(`[WeGirl SessionsSend replies] Failed to publish reply: ${err.message}`);
         }
       },
       onError: (error: unknown, info: { kind: ReplyDispatchKind }) => {
@@ -410,21 +410,21 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
  */
 function aggregateGroupResults(results: Record<string, string>, taskId: string): string {
   const agentIds = Object.keys(results);
-  
+
   if (agentIds.length === 1) {
     return results[agentIds[0]];
   }
-  
+
   // 多 agent 结果聚合
   const sections: string[] = [];
   sections.push(`【多 Agent 协作结果】任务: ${taskId}`);
   sections.push('');
-  
+
   for (const [agentId, result] of Object.entries(results)) {
     sections.push(`【${agentId}】`);
     sections.push(result);
     sections.push('');
   }
-  
+
   return sections.join('\n');
 }
