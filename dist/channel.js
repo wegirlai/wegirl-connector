@@ -1,7 +1,7 @@
 // src/channel.ts - Channel Plugin 定义
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
-import { wegirlSessionsSend } from './sessions-send.js';
+import { wegirlSend } from './core/index.js';
 const KEY_PREFIX = 'wegirl:';
 export const wegirlPlugin = {
     plugin: {
@@ -79,7 +79,7 @@ export const wegirlPlugin = {
                 const instanceId = cfg?.plugins?.entries?.wegirl?.config?.instanceId
                     || process.env.OPENCLAW_INSTANCE_ID
                     || 'instance-local';
-                log.info(`[WeGirl Channel] Starting: ${id} (instance: ${instanceId})`);
+                log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
                 // 优先从 plugin config 读取，其次从 account，最后默认 localhost
                 const redisUrl = cfg?.plugins?.entries?.wegirl?.config?.redisUrl
                     || account?.redisUrl
@@ -127,44 +127,89 @@ export const wegirlPlugin = {
                 const setupConsumerGroup = async () => {
                     await connectPromise;
                     if (!connectionsReady) {
-                        log.warn('[WeGirl Channel] Skipping consumer group setup - Redis not connected');
+                        log.warn(`[WeGirl Channel]<${id}> Skipping consumer group setup - Redis not connected`);
                         return;
                     }
                     try {
                         await streamClient.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
-                        log.info(`[WeGirl Channel] Created consumer group: ${consumerGroup}`);
+                        log.info(`[WeGirl Channel]<${id}> Created consumer group:,${consumerGroup}`);
                     }
                     catch (err) {
                         // 组已存在会报错，忽略
                         if (!err.message?.includes('already exists')) {
-                            log.error('[WeGirl Channel] Failed to create consumer group:', err.message);
+                            log.error(`[WeGirl Channel]<${id}> Failed to create consumer group: ${err.message}`);
                         }
                         else {
-                            log.info(`[WeGirl Channel] Consumer group exists: ${consumerGroup}`);
+                            log.info(`[WeGirl Channel]<${id}> Consumer group exists: ${consumerGroup}`);
                         }
                     }
                 };
                 // 消息处理函数
                 const handleMessage = async (data) => {
                     try {
-                        await wegirlSessionsSend({
-                            message: data.message, cfg,
-                            channel: data.channel, accountId: data.accountId,
-                            from: data.from, chatId: data.chatId, chatType: data.chatType, log,
-                            // 传递原始 routingId 和 messageId，用于回复关联
-                            routingId: data.routingId,
-                            messageId: data.messageId,
-                            // 传递原始 metadata（包含 feishuOpenId 等）
-                            metadata: data.metadata,
-                            // 群聊多 agent 参数
-                            taskId: data.taskId,
-                            agentCount: data.agentCount,
-                            currentAgentId: data.currentAgentId,
-                        });
-                        log.info(`[WeGirl Channel] Message delivered from stream: ${data.routingId || 'unknown'}`);
+                        // 只支持 V2 格式（flowType/source/target）
+                        const flowType = data.flowType;
+                        const source = data.source;
+                        const target = data.target;
+                        const message = data.message;
+                        const chatType = data.chatType || 'direct';
+                        const groupId = data.groupId;
+                        const replyTo = data.replyTo;
+                        const routingId = data.routingId;
+                        // 验证必要字段
+                        if (!flowType || !source || !target) {
+                            log.warn(`[WeGirl Channel]<${id}> Invalid message format: missing flowType/source/target`, { keys: Object.keys(data) });
+                            return;
+                        }
+                        log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}`);
+                        // Parse replyTo - 支持字符串、JSON数组，或特殊值 'NO_REPLY'
+                        let parsedReplyTo = undefined;
+                        if (replyTo) {
+                            if (typeof replyTo === 'string') {
+                                // 尝试解析为 JSON，如果是数组；否则作为普通字符串
+                                if (replyTo === 'NO_REPLY') {
+                                    parsedReplyTo = 'NO_REPLY';
+                                }
+                                else if (replyTo.startsWith('[')) {
+                                    try {
+                                        parsedReplyTo = JSON.parse(replyTo);
+                                    }
+                                    catch {
+                                        parsedReplyTo = replyTo; // 解析失败，作为普通字符串
+                                    }
+                                }
+                                else {
+                                    parsedReplyTo = replyTo; // 普通字符串（如 open_id）
+                                }
+                            }
+                            else {
+                                parsedReplyTo = replyTo;
+                            }
+                        }
+                        const result = await wegirlSend({
+                            flowType,
+                            source,
+                            target,
+                            message,
+                            chatType,
+                            groupId: groupId || undefined,
+                            replyTo: parsedReplyTo,
+                            taskId: data.taskId || undefined,
+                            stepId: data.stepId || undefined,
+                            stepTotalAgents: data.stepTotalAgents ? parseInt(data.stepTotalAgents) : undefined,
+                            routingId,
+                            msgType: data.msgType || 'message',
+                            payload: data.payload ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : undefined,
+                        }, log);
+                        if (result.success) {
+                            log.info(`[WeGirl Channel]<${id}> Message delivered: ${result.routingId}, local=${result.local}`);
+                        }
+                        else {
+                            log.error(`[WeGirl Channel]<${id}> Message failed: ${result.error}`);
+                        }
                     }
                     catch (err) {
-                        log.error('[WeGirl Channel] Failed to dispatch:', err.message);
+                        log.error(`[WeGirl Channel]<${id}> Failed to dispatch: ${err.message}`);
                     }
                 };
                 // Stream 消费循环 - 增强鲁棒性版本
@@ -183,7 +228,7 @@ export const wegirlPlugin = {
                     // 先等待连接就绪
                     await connectPromise;
                     if (!connectionsReady) {
-                        log.error('[WeGirl Channel] Cannot start consumer - Redis connection failed');
+                        log.error(`[WeGirl Channel]<${id}> Cannot start consumer - Redis connection failed`);
                         return;
                     }
                     // 确保消费者组已创建
@@ -219,17 +264,17 @@ export const wegirlPlugin = {
                                         }
                                         // ACK 消息（确认已处理）
                                         await streamClient.xack(streamKey, consumerGroup, messageId);
-                                        log.debug(`[WeGirl Channel] Message ACKed: ${messageId}`);
+                                        log.debug(`[WeGirl Channel]<${id}> Message ACKed: ${messageId}`);
                                     }
                                     catch (err) {
-                                        log.error(`[WeGirl Channel] Failed to process message ${messageId}:`, err.message);
+                                        log.error(`[WeGirl Channel]<${id}> Failed to process message ${messageId}:`, err.message);
                                         // 处理失败也要 ACK，避免消息无限重试
                                         try {
                                             await streamClient.xack(streamKey, consumerGroup, messageId);
-                                            log.debug(`[WeGirl Channel] Message ACKed after error: ${messageId}`);
+                                            log.debug(`[WeGirl Channel]<${id}> Message ACKed after error: ${messageId}`);
                                         }
                                         catch (ackErr) {
-                                            log.error(`[WeGirl Channel] Failed to ACK message ${messageId}:`, ackErr.message);
+                                            log.error(`[WeGirl Channel]<${id}> Failed to ACK message ${messageId}:`, ackErr.message);
                                         }
                                     }
                                 }

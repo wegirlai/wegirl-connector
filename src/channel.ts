@@ -3,6 +3,7 @@
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
 import { wegirlSessionsSend } from './sessions-send.js';
+import { wegirlSend } from './core/index.js';
 
 const KEY_PREFIX = 'wegirl:';
 
@@ -100,6 +101,7 @@ export const wegirlPlugin = {
         const db = cfg?.plugins?.entries?.wegirl?.config?.redisDb
           || account?.redisDb
           || 1;
+        
         const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
         const consumerGroup = 'wegirl-consumers';
         // 使用 accountId + instanceId 作为唯一 consumer 名称，避免多个 account 互相覆盖
@@ -160,23 +162,69 @@ export const wegirlPlugin = {
         // 消息处理函数
         const handleMessage = async (data: any) => {
           try {
-            await wegirlSessionsSend({
-              message: data.message, cfg,
-              channel: data.channel, accountId: data.accountId,
-              from: data.from, chatId: data.chatId, chatType: data.chatType, log,
-              // 传递原始 routingId 和 messageId，用于回复关联
-              routingId: data.routingId,
-              messageId: data.messageId,
-              // 传递原始 metadata（包含 feishuOpenId 等）
-              metadata: data.metadata,
-              // 群聊多 agent 参数
-              taskId: data.taskId,
-              agentCount: data.agentCount,
-              currentAgentId: data.currentAgentId,
-            });
-            log.info(`[WeGirl Channel]<${id}> Message delivered from stream: ${data.routingId || 'unknown'}`);
+            // 只支持 V2 格式（flowType/source/target）
+            const flowType = data.flowType;
+            const source = data.source;
+            const target = data.target;
+            const message = data.message;
+            const chatType = data.chatType || 'direct';
+            const groupId = data.groupId;
+            const replyTo = data.replyTo;
+            const routingId = data.routingId;
+            
+            // 验证必要字段
+            if (!flowType || !source || !target) {
+              log.warn(`[WeGirl Channel]<${id}> Invalid message format: missing flowType/source/target`, 
+                { keys: Object.keys(data) });
+              return;
+            }
+            
+            log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}`);
+            
+            // Parse replyTo - 支持字符串、JSON数组，或特殊值 'NO_REPLY'
+            let parsedReplyTo: string | string[] | undefined = undefined;
+            if (replyTo) {
+              if (typeof replyTo === 'string') {
+                // 尝试解析为 JSON，如果是数组；否则作为普通字符串
+                if (replyTo === 'NO_REPLY') {
+                  parsedReplyTo = 'NO_REPLY';
+                } else if (replyTo.startsWith('[')) {
+                  try {
+                    parsedReplyTo = JSON.parse(replyTo);
+                  } catch {
+                    parsedReplyTo = replyTo; // 解析失败，作为普通字符串
+                  }
+                } else {
+                  parsedReplyTo = replyTo; // 普通字符串（如 open_id）
+                }
+              } else {
+                parsedReplyTo = replyTo;
+              }
+            }
+            
+            const result = await wegirlSend({
+              flowType,
+              source,
+              target,
+              message,
+              chatType,
+              groupId: groupId || undefined,
+              replyTo: parsedReplyTo,
+              taskId: data.taskId || undefined,
+              stepId: data.stepId || undefined,
+              stepTotalAgents: data.stepTotalAgents ? parseInt(data.stepTotalAgents) : undefined,
+              routingId,
+              msgType: data.msgType || 'message',
+              payload: data.payload ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : undefined,
+            }, log);
+            
+            if (result.success) {
+              log.info(`[WeGirl Channel]<${id}> Message delivered: ${result.routingId}, local=${result.local}`);
+            } else {
+              log.error(`[WeGirl Channel]<${id}> Message failed: ${result.error}`);
+            }
           } catch (err: any) {
-            log.error(`[WeGirl Channel]<${id}> Failed to dispatch:${err.message}`);
+            log.error(`[WeGirl Channel]<${id}> Failed to dispatch: ${err.message}`);
           }
         };
 

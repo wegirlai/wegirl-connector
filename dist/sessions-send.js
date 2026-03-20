@@ -124,10 +124,10 @@ export async function wegirlSessionsSend(options) {
                 timestamp: Date.now()
             };
             await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
-            log?.info?.(`[WeGirl SessionsSend] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}`);
+            log?.info?.(`[WeGirl SessionsSend forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}`);
         }
         catch (err) {
-            log?.error?.('[WeGirl SessionsSend] Redis forward failed:', err.message);
+            log?.error?.('[WeGirl SessionsSend forward] Redis forward failed:', err.message);
         }
         // 3. 构建 envelope
         const body = runtime.channel.reply.formatAgentEnvelope({
@@ -241,11 +241,11 @@ export async function wegirlSessionsSend(options) {
                     log?.debug?.(`[WeGirl SessionsSend] effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
                     return;
                 }
-                log?.info?.(`[WeGirl SessionsSend] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
+                log?.info?.(`[WeGirl SessionsSend replies] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
                 try {
                     const pub = await getRedisPublisher(cfg);
                     if (!pub) {
-                        log?.error?.(`[WeGirl SessionsSend] Redis publisher not connected`);
+                        log?.error?.(`[WeGirl SessionsSend replies] Redis publisher not connected`);
                         return;
                     }
                     const replyId = `wegirl-reply-${Date.now()}`;
@@ -269,22 +269,22 @@ export async function wegirlSessionsSend(options) {
                         error: undefined, // 预留：错误信息
                         timestamp: Date.now(),
                     };
-                    log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
+                    //log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
                     // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
-                    console.log('[WE_GIRL_REPLY_MESSAGE]', JSON.stringify(replyMessage, null, 2));
+                    console.log('[WeGirl SessionsSend replies]', JSON.stringify(replyMessage, null, 2));
                     // 写入文件以便查看真实数据
                     try {
                         const fs = require('fs');
                         const path = require('path');
                         const logPath = path.join(process.env.HOME || '/root', '.openclaw', 'wegirl-reply-debug.json');
                         fs.writeFileSync(logPath, JSON.stringify(replyMessage, null, 2));
-                        log?.info?.(`[WeGirl SessionsSend] replyMessage written to ${logPath}`);
+                        log?.info?.(`[WeGirl SessionsSend replies] replyMessage written to ${logPath}`);
                     }
                     catch (e) {
-                        log?.error?.(`[WeGirl SessionsSend] Failed to write replyMessage:`, e.message);
+                        log?.error?.(`[WeGirl SessionsSend replies] Failed to write replyMessage:`, e.message);
                     }
                     await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-                    log?.info?.(`[WeGirl SessionsSend] Reply published to wegirl:replies`);
+                    log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies`);
                 }
                 catch (err) {
                     // 发送失败，发布错误回复
@@ -316,7 +316,7 @@ export async function wegirlSessionsSend(options) {
                         }
                     }
                     catch { }
-                    log?.error?.(`[WeGirl SessionsSend] Failed to publish reply: ${err.message}`);
+                    log?.error?.(`[WeGirl SessionsSend replies] Failed to publish reply: ${err.message}`);
                 }
             },
             onError: (error, info) => {

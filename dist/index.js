@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { wegirlPlugin } from './channel.js';
-import { setWeGirlRuntime } from './runtime.js';
+import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
 import { MessageRouter } from './router.js';
@@ -9,6 +9,7 @@ import { WeGirlTools } from './tools.js';
 import { registerEventHandlers } from './event-handlers.js';
 import { executeCreateAgent } from './hr-manage-core.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
+import { wegirlSend } from './core/index.js'; // 新核心模块
 // 模块实例
 let redisClient = null;
 let redisConnectPromise = null;
@@ -26,15 +27,18 @@ const plugin = {
         // 实例ID（从配置、环境变量或默认值）
         const INSTANCE_ID = pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
         logger.info(`[WeGirl] Plugin registering... (Instance: ${INSTANCE_ID})`);
-        // 保存 PluginRuntime
+        // 保存 PluginRuntime 和 PluginConfig
         if (context.runtime) {
             setWeGirlRuntime(context.runtime);
             logger.info('[WeGirl] Runtime saved to global');
-            logger.info(`[WeGirl] Runtime type: ${typeof context.runtime}`);
-            logger.info(`[WeGirl] Runtime methods: ${Object.keys(context.runtime).join(', ')}`);
         }
         else {
             logger.error('[WeGirl] No runtime in context!');
+        }
+        if (pluginConfig) {
+            setWeGirlConfig(pluginConfig);
+            logger.info('[WeGirl] PluginConfig saved to global');
+            logger.info(`[WeGirl] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
         }
         // 初始化 Redis 连接
         async function initRedis() {
@@ -143,32 +147,85 @@ const plugin = {
         }
         // 注册 Tools（异步初始化后可用）
         if (typeof context.registerTool === 'function') {
+            // WeGirl Send - 统一接口
             context.registerTool({
                 name: 'wegirl_send',
-                description: 'Send message through WeGirl hub to other agents or humans',
+                description: 'WeGirl 统一消息发送接口：支持 H2A/A2A/A2H 流向，多实例路由，任务和步骤追踪。所有 ID 使用 StaffId。',
                 parameters: {
                     type: 'object',
                     properties: {
+                        flowType: {
+                            type: 'string',
+                            enum: ['H2A', 'A2A', 'A2H'],
+                            description: '消息流向类型: H2A(human->agent), A2A(agent->agent), A2H(agent->human)'
+                        },
+                        source: {
+                            type: 'string',
+                            description: '来源 StaffId（必填）'
+                        },
                         target: {
                             type: 'string',
-                            description: 'Target address, e.g., "default", "scout", "ou_xxx" (human user)'
+                            description: '目标 StaffId（必填）'
                         },
                         message: {
                             type: 'string',
-                            description: 'Message content to send'
+                            description: '消息内容（必填）'
+                        },
+                        chatType: {
+                            type: 'string',
+                            enum: ['direct', 'group'],
+                            description: '聊天类型: direct(单聊默认), group(群聊)',
+                            default: 'direct'
+                        },
+                        groupId: {
+                            type: 'string',
+                            description: '群聊ID（chatType=group 时必填）'
+                        },
+                        replyTo: {
+                            oneOf: [
+                                { type: 'string' },
+                                { type: 'array', items: { type: 'string' } }
+                            ],
+                            description: '回复目标 StaffId。默认: 单聊=source, 群聊=target。使用 "system:no_reply" 表示不回复'
+                        },
+                        taskId: {
+                            type: 'string',
+                            description: '任务ID（可选，如有则全程携带）'
+                        },
+                        stepId: {
+                            type: 'string',
+                            description: '步骤ID（可选，需配合 taskId）'
+                        },
+                        stepTotalAgents: {
+                            type: 'number',
+                            description: '步骤总 Agent 数（stepId 存在时）'
+                        },
+                        routingId: {
+                            type: 'string',
+                            description: '路由追踪ID（可选）'
                         }
                     },
-                    required: ['target', 'message']
+                    required: ['flowType', 'source', 'target', 'message']
                 },
                 execute: async (_toolCallId, params) => {
-                    // 使用 console.log 确保日志输出（logger 可能在此上下文中不可用）
-                    console.log(`[WeGirl] ========== wegirl_send execute ==========`);
-                    console.log(`[WeGirl] _toolCallId:`, _toolCallId);
-                    console.log(`[WeGirl] params:`, JSON.stringify(params, null, 2));
-                    await initRedis();
-                    if (!wegirlTools)
-                        throw new Error('WeGirl not initialized');
-                    return wegirlTools.send(params);
+                    logger.info(`[wegirl_send] 调用:`, JSON.stringify(params));
+                    try {
+                        const result = await wegirlSend(params, logger);
+                        return {
+                            success: result.success,
+                            routingId: result.routingId,
+                            local: result.local,
+                            targetInstanceId: result.targetInstanceId,
+                            error: result.error
+                        };
+                    }
+                    catch (err) {
+                        logger.error(`[wegirl_send] 失败:`, err.message);
+                        return {
+                            success: false,
+                            error: err.message
+                        };
+                    }
                 }
             });
             // HR Manage Tool - 仅限 HR Agent 使用
@@ -836,15 +893,22 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
     const fromUser = message.from;
     const senderName = message.senderName || message.fromUserName;
     const mentions = message.mentions || message.metadata?.mentions || [];
-    // 1. 私聊消息 → 直接建立人类员工
+    // 1. 私聊消息 → 入职绑定流程
     if (chatType === 'p2p') {
         logger.info(`[hr_manage:process_message] Private message from ${fromUser}`);
-        await handlePrivateMessage(fromUser, senderName, message.fromUserOpenId, redis, logger, instanceId);
+        await handlePrivateMessage({
+            message: message.message || '',
+            userId: fromUser,
+            userName: senderName,
+            feishuOpenId: message.fromUserOpenId,
+            chatId: message.chatId || message.chat_id || fromUser,
+            chatType: chatType,
+        }, redis, logger, instanceId);
         return {
             success: true,
-            action: 'onboard_human',
+            action: 'process_onboard',
             userId: fromUser,
-            message: '私聊消息已处理，人类员工入职命令已发送'
+            message: '私聊消息已处理（入职绑定流程）'
         };
     }
     // 2. 群聊 @ 消息 → 判断是 agent 还是人类
