@@ -898,8 +898,11 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
             success: result.handled,
             action: 'process_onboard',
             userId: fromUser,
-            message: result.handled
-                ? (result.error ? '入职信息处理失败' : '入职消息已发送')
+            status: result.handled
+                ? (result.error ? 'error' : 'sent')
+                : 'ignored',
+            note: result.handled
+                ? (result.error ? '入职信息处理失败' : '消息已通过 deliver 发送')
                 : '未识别为入职消息'
         };
     }
