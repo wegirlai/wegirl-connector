@@ -294,7 +294,7 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         const onboardMsg = {
             flowType: 'A2A',
             source: 'hr',
-            target: 'default', // 发送给 CTO (default agent) 处理
+            target: 'default', // 人事专员处理队列
             message: `收到新员工入职申请：${data.name} (${data.staffId})`,
             chatType: 'direct',
             msgType: 'onboard_human',

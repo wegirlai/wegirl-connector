@@ -380,17 +380,6 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
           console.log('[WeGirl SessionsSend replies]', JSON.stringify(replyMessage, null, 2));
 
-          // 写入文件以便查看真实数据
-          try {
-            const fs = require('fs');
-            const path = require('path');
-            const logPath = path.join(process.env.HOME || '/root', '.openclaw', 'wegirl-reply-debug.json');
-            fs.writeFileSync(logPath, JSON.stringify(replyMessage, null, 2));
-            log?.info?.(`[WeGirl SessionsSend replies] replyMessage written to ${logPath}`);
-          } catch (e: any) {
-            log?.error?.(`[WeGirl SessionsSend replies] Failed to write replyMessage:`, e.message);
-          }
-
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
           log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies`);
         } catch (err: any) {

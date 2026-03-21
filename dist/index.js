@@ -9,7 +9,6 @@ import { PendingQueue } from './queue.js';
 import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers } from './event-handlers.js';
-import { executeCreateAgent } from './hr-manage-core.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js'; // 新核心模块
 // 缓存 openclaw.json 配置
@@ -217,7 +216,7 @@ const plugin = {
                     required: ['flowType', 'source', 'target', 'message']
                 },
                 execute: async (_toolCallId, params) => {
-                    logger.info(`[wegirl_send] 调用:`, JSON.stringify(params));
+                    logger.info(`[wegirl_send] 调用: ${JSON.stringify(params)}`);
                     try {
                         const result = await wegirlSend(params, logger);
                         return {
@@ -240,37 +239,18 @@ const plugin = {
             // HR Manage Tool - 仅限 HR Agent 使用
             context.registerTool({
                 name: 'hr_manage',
-                description: 'HR Agent 专用：创建和管理 OpenClaw Agents，同步 agents 到 Redis，以及处理新成员入职。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis；4) 处理新员工入职使用 create_staff。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
+                description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 同步本地信息到 Redis 使用 sync_agents_to_redis。',
                 parameters: {
                     type: 'object',
                     properties: {
                         action: {
                             type: 'string',
-                            enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis', 'send_command', 'create_staff'],
+                            enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff'],
                             description: '操作类型'
-                        },
-                        agentName: {
-                            type: 'string',
-                            description: 'Agent 名称（如：sales, marketing, support）。只能包含英文字母、数字、横线(-)和下划线(_)'
                         },
                         accountId: {
                             type: 'string',
-                            description: 'WeGirl account ID（如：sales）。默认值为 {agentName}'
-                        },
-                        instanceId: {
-                            type: 'string',
-                            description: '实例 ID。默认值为 HR 所在实例',
-                        },
-                        capabilities: {
-                            type: 'array',
-                            items: { type: 'string' },
-                            description: 'Agent 能力列表',
-                            default: []
-                        },
-                        role: {
-                            type: 'string',
-                            description: '职能/角色（如：销售专员、技术支持）',
-                            default: '-'
+                            description: 'Agent account ID（delete_agent 时使用）'
                         },
                         command: {
                             type: 'string',
@@ -282,14 +262,26 @@ const plugin = {
                             description: '命令参数（send_command 时使用）'
                         },
                         message: {
-                            type: 'object',
-                            description: '入职请求消息（create_staff 时使用）'
+                            type: 'string',
+                            description: '用户消息内容（create_staff 时使用）'
+                        },
+                        userId: {
+                            type: 'string',
+                            description: '用户唯一标识（create_staff 时使用）'
+                        },
+                        userName: {
+                            type: 'string',
+                            description: '用户显示名（create_staff 时使用，可选）'
+                        },
+                        userOpenId: {
+                            type: 'string',
+                            description: '用户 OpenId（create_staff 时使用，可选）'
                         }
                     },
                     required: ['action']
                 },
                 execute: async (_toolCallId, params) => {
-                    logger.info(`[hr_manage] 被调用, params=`, JSON.stringify(params));
+                    console.log(`[hr_manage] 被调用, params=${JSON.stringify(params)}`);
                     await initRedis();
                     if (!redisClient)
                         throw new Error('Redis not initialized');
@@ -297,46 +289,24 @@ const plugin = {
                     const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
                     let result;
                     switch (action) {
-                        case 'create_agent': {
-                            // 参数处理与验证
-                            let { agentName, accountId, instanceId, capabilities, role } = params;
-                            // agentName 必填
-                            if (!agentName) {
-                                throw new Error('缺少必填参数: agentName');
-                            }
-                            // 验证 agentName: 只允许英文字母、数字、-、_
-                            const validNameRegex = /^[a-zA-Z0-9_-]+$/;
-                            if (!validNameRegex.test(agentName)) {
-                                throw new Error('agentName 只能包含英文字母、数字、横线(-)和下划线(_)');
-                            }
-                            // 默认值处理
-                            // instanceId 默认为当前实例（HR 所在实例）
-                            instanceId = instanceId || INSTANCE_ID;
-                            // accountId 默认为 {agentName}
-                            accountId = accountId || `${agentName}`;
-                            // role 默认为 '-'
-                            role = role || '-';
-                            result = await executeCreateAgent({
-                                agentName,
-                                accountId,
-                                instanceId,
-                                capabilities: capabilities || [],
-                                role
-                            }, {
-                                instanceId: INSTANCE_ID,
-                                logger,
-                                redis: redisClient
-                            });
+                        case 'create_staff': {
+                            const { message, chatType, userId, userName, userOpenId } = params;
+                            // 构建标准化的消息对象
+                            const normalizedMessage = {
+                                chatType: chatType || 'p2p',
+                                from: userId,
+                                message: message,
+                                fromUserOpenId: userOpenId || userId,
+                                fromUserName: userName
+                            };
+                            result = await handleProcessMessage(normalizedMessage, redisClient, logger, INSTANCE_ID);
                             break;
                         }
-                        case 'list_agents':
+                        case 'list_staffs':
                             result = await handleListAgents(redisClient, logger);
                             break;
-                        case 'get_agent':
+                        case 'get_staff':
                             result = await handleGetAgent(params, redisClient, logger);
-                            break;
-                        case 'delete_agent':
-                            result = await handleDeleteAgent(params, redisClient, logger);
                             break;
                         case 'sync_agents_to_redis':
                             result = await handleSyncAgents(redisClient, logger);
@@ -349,17 +319,10 @@ const plugin = {
                             result = await handleSendCommand({ command, payload: cmdPayload || {} }, redisClient, logger, INSTANCE_ID);
                             break;
                         }
-                        case 'create_staff': {
-                            const { message } = params;
-                            if (!message) {
-                                throw new Error('缺少必填参数: message');
-                            }
-                            result = await handleProcessMessage(message, redisClient, logger, INSTANCE_ID);
-                            break;
-                        }
                         default:
                             throw new Error(`未知操作: ${action}`);
                     }
+                    logger.info(`[hr_manage] action=${action} 执行完成`);
                     // 返回 OpenClaw 期望的格式
                     return {
                         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -907,14 +870,14 @@ async function handleSendCommand(args, redis, logger, instanceId) {
  * 根据消息类型（私聊/群聊@）判断并发送相应命令
  */
 async function handleProcessMessage(message, redis, logger, instanceId) {
-    logger.info(`[hr_manage:process_message] Processing message`);
+    logger.info(`[hr_manage:create_staff] Processing message`);
     const chatType = message.chatType || message.chat_type;
     const fromUser = message.from;
     const senderName = message.senderName || message.fromUserName;
     const mentions = message.mentions || message.metadata?.mentions || [];
     // 1. 私聊消息 → 入职绑定流程
     if (chatType === 'p2p') {
-        logger.info(`[hr_manage:process_message] Private message from ${fromUser}`);
+        logger.info(`[hr_manage:create_staff] Private message from ${fromUser}`);
         await handlePrivateMessage({
             message: message.message || '',
             userId: fromUser,
@@ -932,7 +895,7 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
     }
     // 2. 群聊 @ 消息 → 判断是 agent 还是人类
     if (chatType === 'group' && mentions && mentions.length > 0) {
-        logger.info(`[hr_manage:process_message] Group mention message with ${mentions.length} mentions`);
+        logger.info(`[hr_manage:create_staff] Group mention message with ${mentions.length} mentions`);
         const results = [];
         for (const mention of mentions) {
             const mentionKey = mention.key || mention;

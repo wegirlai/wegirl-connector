@@ -249,7 +249,7 @@ const plugin = {
           required: ['flowType', 'source', 'target', 'message']
         },
         execute: async (_toolCallId: string, params: any) => {
-          logger.info(`[wegirl_send] 调用:`, JSON.stringify(params));
+          logger.info(`[wegirl_send] 调用: ${JSON.stringify(params)}`);
           
           try {
             const result = await wegirlSend(params, logger);
@@ -273,37 +273,18 @@ const plugin = {
       // HR Manage Tool - 仅限 HR Agent 使用
       context.registerTool({
         name: 'hr_manage',
-        description: 'HR Agent 专用：创建和管理 OpenClaw Agents，同步 agents 到 Redis，以及处理新成员入职。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis；4) 处理新员工入职使用 create_staff。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
+        description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 同步本地信息到 Redis 使用 sync_agents_to_redis。',
         parameters: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-              enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis', 'send_command', 'create_staff'],
+              enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff'],
               description: '操作类型'
-            },
-            agentName: {
-              type: 'string',
-              description: 'Agent 名称（如：sales, marketing, support）。只能包含英文字母、数字、横线(-)和下划线(_)'
             },
             accountId: {
               type: 'string',
-              description: 'WeGirl account ID（如：sales）。默认值为 {agentName}'
-            },
-            instanceId: {
-              type: 'string',
-              description: '实例 ID。默认值为 HR 所在实例',
-            },
-            capabilities: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Agent 能力列表',
-              default: []
-            },
-            role: {
-              type: 'string',
-              description: '职能/角色（如：销售专员、技术支持）',
-              default: '-'
+              description: 'Agent account ID（delete_agent 时使用）'
             },
             command: {
               type: 'string',
@@ -315,14 +296,26 @@ const plugin = {
               description: '命令参数（send_command 时使用）'
             },
             message: {
-              type: 'object',
-              description: '入职请求消息（create_staff 时使用）'
+              type: 'string',
+              description: '用户消息内容（create_staff 时使用）'
+            },
+            userId: {
+              type: 'string',
+              description: '用户唯一标识（create_staff 时使用）'
+            },
+            userName: {
+              type: 'string',
+              description: '用户显示名（create_staff 时使用，可选）'
+            },
+            userOpenId: {
+              type: 'string',
+              description: '用户 OpenId（create_staff 时使用，可选）'
             }
           },
           required: ['action']
         },
         execute: async (_toolCallId: string, params: any) => {
-          logger.info(`[hr_manage] 被调用, params=`, JSON.stringify(params));
+          console.log(`[hr_manage] 被调用, params=${JSON.stringify(params)}`);
 
           await initRedis();
           if (!redisClient) throw new Error('Redis not initialized');
@@ -332,52 +325,31 @@ const plugin = {
 
           let result: any;
           switch (action) {
-            case 'create_agent': {
-              // 参数处理与验证
-              let { agentName, accountId, instanceId, capabilities, role } = params;
-
-              // agentName 必填
-              if (!agentName) {
-                throw new Error('缺少必填参数: agentName');
-              }
-
-              // 验证 agentName: 只允许英文字母、数字、-、_
-              const validNameRegex = /^[a-zA-Z0-9_-]+$/;
-              if (!validNameRegex.test(agentName)) {
-                throw new Error('agentName 只能包含英文字母、数字、横线(-)和下划线(_)');
-              }
-
-              // 默认值处理
-              // instanceId 默认为当前实例（HR 所在实例）
-              instanceId = instanceId || INSTANCE_ID;
-
-              // accountId 默认为 {agentName}
-              accountId = accountId || `${agentName}`;
-
-              // role 默认为 '-'
-              role = role || '-';
-
-              result = await executeCreateAgent({
-                agentName,
-                accountId,
-                instanceId,
-                capabilities: capabilities || [],
-                role
-              }, {
-                instanceId: INSTANCE_ID,
+            case 'create_staff': {
+              const { message, chatType, userId, userName, userOpenId } = params;
+              
+              // 构建标准化的消息对象
+              const normalizedMessage = {
+                chatType: chatType || 'p2p',
+                from: userId,
+                message: message,
+                fromUserOpenId: userOpenId || userId,
+                fromUserName: userName
+              };
+              
+              result = await handleProcessMessage(
+                normalizedMessage,
+                redisClient,
                 logger,
-                redis: redisClient
-              });
+                INSTANCE_ID
+              );
               break;
             }
-            case 'list_agents':
+            case 'list_staffs':
               result = await handleListAgents(redisClient, logger);
               break;
-            case 'get_agent':
+            case 'get_staff':
               result = await handleGetAgent(params, redisClient, logger);
-              break;
-            case 'delete_agent':
-              result = await handleDeleteAgent(params, redisClient, logger);
               break;
             case 'sync_agents_to_redis':
               result = await handleSyncAgents(redisClient, logger);
@@ -395,22 +367,11 @@ const plugin = {
               );
               break;
             }
-            case 'create_staff': {
-              const { message } = params;
-              if (!message) {
-                throw new Error('缺少必填参数: message');
-              }
-              result = await handleProcessMessage(
-                message,
-                redisClient,
-                logger,
-                INSTANCE_ID
-              );
-              break;
-            }
             default:
               throw new Error(`未知操作: ${action}`);
           }
+
+          logger.info(`[hr_manage] action=${action} 执行完成`);
 
           // 返回 OpenClaw 期望的格式
           return {
@@ -1071,7 +1032,7 @@ async function handleProcessMessage(
   logger: any,
   instanceId: string
 ): Promise<any> {
-  logger.info(`[hr_manage:process_message] Processing message`);
+  logger.info(`[hr_manage:create_staff] Processing message`);
   
   const chatType = message.chatType || message.chat_type;
   const fromUser = message.from;
@@ -1080,7 +1041,7 @@ async function handleProcessMessage(
   
   // 1. 私聊消息 → 入职绑定流程
   if (chatType === 'p2p') {
-    logger.info(`[hr_manage:process_message] Private message from ${fromUser}`);
+    logger.info(`[hr_manage:create_staff] Private message from ${fromUser}`);
     
     await handlePrivateMessage(
       {
@@ -1106,7 +1067,7 @@ async function handleProcessMessage(
   
   // 2. 群聊 @ 消息 → 判断是 agent 还是人类
   if (chatType === 'group' && mentions && mentions.length > 0) {
-    logger.info(`[hr_manage:process_message] Group mention message with ${mentions.length} mentions`);
+    logger.info(`[hr_manage:create_staff] Group mention message with ${mentions.length} mentions`);
     
     const results = [];
     
