@@ -289,26 +289,38 @@ const plugin = {
             },
             message: {
               type: 'string',
-              description: '消息内容（create_staff 时使用，对应 SessionsSendOptions.message）'
+              description: '用户发送的完整消息内容'
+            },
+            senderName: {
+              type: 'string',
+              description: '用户显示名称（可选，如：张三）'
+            },
+            senderOpenId: {
+              type: 'string',
+              description: '用户的 Feishu Open ID，格式为 "oc_xxxx"（与 source 相同，可选）'
+            },
+            groupId: {
+              type: 'string',
+              description: '群聊ID（chatType=group 时必填）'
             },
             source: {
               type: 'string',
-              description: '来源用户ID（create_staff 时使用，对应 SessionsSendOptions.source，原 userId）'
+              description: '来源用户的 Feishu Open ID，格式为 "oc_xxxx"（飞书用户的 Open ID，不是 user_id）'
             },
             target: {
               type: 'string',
-              description: '目标ID（create_staff 时使用，对应 SessionsSendOptions.target，默认 default）',
-              default: 'default'
+              description: '目标接收者，固定为 "hr"（表示人事专员处理）',
+              default: 'hr'
             },
             chatType: {
               type: 'string',
               enum: ['direct', 'group'],
-              description: '聊天类型',
+              description: '聊天类型：direct=私聊，group=群聊',
               default: 'direct'
             },
             routingId: {
               type: 'string',
-              description: '路由追踪ID'
+              description: '路由追踪ID（可选）'
             }
           },
           required: ['action']
