@@ -218,6 +218,92 @@ payload: {
 - 日志前缀统一：`[hr_manage:process_message]` → `[hr_manage:create_staff]`
 - GitHub 提交: `4d3b8c4`
 
+### v2.0.27 (2026-03-21)
+**统一 error 处理**
+
+- 统一 error 处理逻辑，由 deliver 统一发送消息
+- `hr_manage` 内部不再直接发送错误消息
+- GitHub 提交: `429cb75`
+
+### v2.0.28 (2026-03-21)
+**统一返回值格式**
+
+- 修改 `hr_manage` 返回值，使用 `status`/`note` 替代 `message`
+- 避免 HR agent 混淆返回值和发送给用户的消息
+- GitHub 提交: `189d979`
+
+### v2.0.29-32 (2026-03-21)
+**消息发送架构重构**
+
+- v2.0.29: `handlePrivateMessage` 内部 publish 并返回 `success=false`
+- v2.0.30-31: 重构返回值结构，`handlePrivateMessage` 返回 `{handled, result}`
+- v2.0.32: 简化 `handlePrivateMessage`，直接返回 `messageObj` 或 `null`
+- 统一在 `handleProcessMessage` 中 publish 消息
+- `execute` 返回 `{content: []}` 防止 deliver 重复发送
+- GitHub 提交: `e6c441a`
+
+### v2.0.33 (2026-03-21)
+**新增 RepliesSubscriber**
+
+- 新增 `replies-subscriber.ts` 模块
+- 订阅 `wegirl:replies` channel
+- 统一处理 `message` 和 `error` msgType
+- 预留 `onboard_human` 处理接口
+- GitHub 提交: (已移除)
+
+### v2.0.34-35 (2026-03-21)
+**职责分离：移除 RepliesSubscriber**
+
+- v2.0.34: 添加 `RepliesSubscriber` 到 `index.ts`
+- v2.0.35: 从 wegirl-connector 移除 `RepliesSubscriber`
+- **架构调整**: `onboard_human` 处理移至 **wegirl-service**
+- wegirl-connector 职责：只发送消息到 `wegirl:replies`
+- wegirl-service 职责：订阅并处理 `wegirl:replies`
+
+### v2.0.36 (2026-03-21)
+**移除 HR agent 回复拦截**
+
+- 移除 `sessions-send.ts` 中的 HR agent 特殊处理
+- HR 消息现在正常通过 deliver 发送
+- 不再拦截 HR agent 的回复
+
+### v2.0.37-38 (2026-03-21)
+**Debug 日志优化**
+
+- v2.0.37: agent reply debug log 输出完整 `forwardMsg` JSON
+- v2.0.38: 改为输出 `payload` 参数
+
+### v2.0.39 (2026-03-21) ⭐ Latest
+**SessionsSendOptions 参数对齐**
+
+- `hr_manage` `create_staff` 参数与 `SessionsSendOptions` 对齐
+- **参数变更**:
+  - `userId` → `source`
+  - `userName` → `senderName`
+  - `userOpenId` → `senderOpenId`
+- **新增参数**:
+  - `target`: 目标 ID（默认 'default'）
+  - `chatType`: 聊天类型（direct/group）
+  - `groupId`: 群聊 ID
+  - `routingId`: 路由追踪 ID
+- 更新 HR SOUL.md 参数文档
+- 统一术语：使用 `source`/`target` 替代 `userId`
+
+**调用示例**:
+```javascript
+hr_manage({
+  action: "create_staff",
+  message: "用户消息内容",
+  source: "ou_xxx",          // 原 userId
+  target: "default",
+  chatType: "direct",
+  senderName: "用户名",      // 原 userName
+  senderOpenId: "ou_xxx",    // 原 userOpenId
+  groupId: "chat_xxx",       // 可选
+  routingId: "routing_xxx"   // 可选
+})
+```
+
 ---
 
 ## 升级指南

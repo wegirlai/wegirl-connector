@@ -297,19 +297,38 @@ const plugin = {
             },
             message: {
               type: 'string',
-              description: '用户消息内容（create_staff 时使用）'
+              description: '消息内容（create_staff 时使用，对应 SessionsSendOptions.message）'
             },
-            userId: {
+            source: {
               type: 'string',
-              description: '用户唯一标识（create_staff 时使用）'
+              description: '来源用户ID（create_staff 时使用，对应 SessionsSendOptions.source，原 userId）'
             },
-            userName: {
+            target: {
               type: 'string',
-              description: '用户显示名（create_staff 时使用，可选）'
+              description: '目标ID（create_staff 时使用，对应 SessionsSendOptions.target，默认 default）',
+              default: 'default'
             },
-            userOpenId: {
+            chatType: {
               type: 'string',
-              description: '用户 OpenId（create_staff 时使用，可选）'
+              enum: ['direct', 'group'],
+              description: '聊天类型（create_staff 时使用，对应 SessionsSendOptions.chatType）',
+              default: 'direct'
+            },
+            senderName: {
+              type: 'string',
+              description: '发送者显示名（create_staff 时使用，可选，原 userName）'
+            },
+            senderOpenId: {
+              type: 'string',
+              description: '发送者 OpenId（create_staff 时使用，可选，原 userOpenId）'
+            },
+            groupId: {
+              type: 'string',
+              description: '群聊ID（chatType=group 时使用，对应 SessionsSendOptions.groupId）'
+            },
+            routingId: {
+              type: 'string',
+              description: '路由追踪ID（可选，对应 SessionsSendOptions.routingId）'
             }
           },
           required: ['action']
@@ -326,17 +345,20 @@ const plugin = {
           let result: any;
           switch (action) {
             case 'create_staff': {
-              const { message, chatType, userId, userName, userOpenId } = params;
+              const { message, chatType, source, target, senderName, senderOpenId, groupId, routingId } = params;
               
-              console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, userId, userName, userOpenId }));
+              console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, senderOpenId, groupId, routingId }));
               
-              // 构建标准化的消息对象
+              // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
               const normalizedMessage = {
-                chatType: chatType || 'p2p',
-                from: userId,
-                message: message,
-                fromUserOpenId: userOpenId || userId,
-                fromUserName: userName
+                chatType: chatType || 'direct',
+                from: source,                    // 对应 SessionsSendOptions.source
+                message: message,                // 对应 SessionsSendOptions.message
+                fromUserOpenId: senderOpenId || source,  // 对应 senderOpenId
+                fromUserName: senderName,
+                to: target || 'default',         // 对应 SessionsSendOptions.target
+                groupId: groupId,                // 对应 SessionsSendOptions.groupId
+                routingId: routingId             // 对应 SessionsSendOptions.routingId
               };
               
               console.log(`[hr_manage:create_staff] 构建消息对象:`, JSON.stringify(normalizedMessage));

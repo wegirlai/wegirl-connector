@@ -178,10 +178,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const messageId = originalMessageId || `wegirl-${Date.now()}`;
     const createdAt = Date.now();
 
+    // 定义 forwardMsg 在更高作用域，以便后续回调函数访问
+    let forwardMsg: any;
+
     // 2. 发送 Redis 消息（使用标准 V2 格式）
     try {
       const redis = await getRedisPublisher(cfg);
-      const forwardMsg = {
+      forwardMsg = {
         // 标准 V2 字段
         flowType: 'H2A',
         source: from,
@@ -256,17 +259,10 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
       deliver: async (payload: ReplyPayload, info: { kind: ReplyDispatchKind }) => {
         const text = payload.text ?? '';
-        log?.debug?.(`[WeGirl SessionsSend] agent reply: kind=${info?.kind}, channel=${channel}, text=${text.substring(0, 50)}`);
+        log?.debug?.(`[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
 
         // 只处理最终回复
         if (info?.kind !== 'final' || !text.trim()) {
-          return;
-        }
-
-        // ===== HR Agent 特殊处理 =====
-        // HR agent 的回复通过 hr_manage 工具内部处理，这里不发送
-        if (agentId === 'hr' || agentId === 'HR') {
-          log?.info?.(`[WeGirl SessionsSend] HR agent reply skipped, handled by hr_manage internally`);
           return;
         }
 

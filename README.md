@@ -22,7 +22,31 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.0 (2026-03-21) ⭐ Current
+### v2.0.39 (2026-03-21) ⭐ Current
+
+**与 wegirl-service 集成**:
+- ✅ 职责分离：wegirl-connector 只发送，`wegirl-service` 处理业务逻辑
+- ✅ `hr_manage` 参数与 `SessionsSendOptions` 对齐（`source`/`target`/`chatType` 等）
+- ✅ 移除 HR agent 回复拦截
+- ✅ 移除 `RepliesSubscriber`（移至 wegirl-service）
+
+**协议对齐**:
+- ✅ 统一使用 `source`/`target` 替代 `userId`
+- ✅ 新增 `senderName`/`senderOpenId`/`groupId`/`routingId` 参数
+
+---
+
+### v2.0.27-38 (2026-03-21)
+
+**消息架构重构**:
+- ✅ 统一 error 处理（deliver 统一发送）
+- ✅ 统一返回值格式（`status`/`note`）
+- ✅ `handleProcessMessage` 统一 publish，execute 返回 `{content: []}`
+- ✅ Debug 日志优化
+
+---
+
+### v2.0 (2026-03-21)
 
 **架构升级**:
 - ✅ 统一 StaffId 抽象（人类和 Agent 统一标识）
@@ -52,6 +76,8 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ replyTo 解析支持字符串 open_id
 - ✅ 为所有 Agent 配置 anthropic auth profile
 - ✅ 修复 isOnboardRequest/isOnboardFormat 空值检查
+
+详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md)
 
 ---
 
@@ -127,6 +153,26 @@ npm run build
   chatType: "direct"
 }
 ```
+
+### `hr_manage`
+
+HR Agent 专用工具（create_staff action）:
+
+```javascript
+{
+  action: "create_staff",
+  message: "用户消息内容",
+  source: "ou_xxx",          // 用户ID (对应 SessionsSendOptions.source)
+  target: "default",         // 目标ID (默认)
+  chatType: "direct",        // 聊天类型: direct/group
+  senderName: "用户名",      // 发送者显示名
+  senderOpenId: "ou_xxx",    // 发送者 OpenId
+  groupId: "chat_xxx",       // 群聊ID (可选)
+  routingId: "routing_xxx"   // 路由追踪ID (可选)
+}
+```
+
+详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md) 完整版本历史。
 
 ## 核心模块
 
