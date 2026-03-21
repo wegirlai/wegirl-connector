@@ -194,17 +194,23 @@ export async function wegirlSend(options, logger) {
             metadata.taskId = ctx.taskId;
         if (ctx.stepId)
             metadata.stepId = ctx.stepId;
-        // 调用 V1
+        // 调用 V1 - 使用统一参数名
         await wegirlSessionsSend({
             message: options.message,
+            source: ctx.source,
+            target: ctx.target,
+            chatType: ctx.chatType,
+            groupId: chatId,
+            routingId: ctx.routingId,
+            taskId: ctx.taskId,
+            stepId: ctx.stepId,
+            stepTotalAgents: ctx.stepTotalAgents,
+            msgType: options.msgType,
+            payload: options.payload,
+            metadata,
+            // V1 内部字段
             cfg,
             channel: 'wegirl',
-            accountId: ctx.target,
-            from: ctx.source,
-            chatId,
-            chatType: ctx.chatType,
-            routingId: ctx.routingId,
-            metadata,
             log: logger,
         });
         return { success: true, routingId, local: true };

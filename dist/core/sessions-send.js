@@ -41,7 +41,16 @@ async function getRedisPublisher(cfg) {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options) {
-    const { message, cfg: originalCfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId, routingId: originalRoutingId, messageId: originalMessageId, metadata: originalMetadata } = options;
+    const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata } = options;
+    // 内部变量映射（保持与旧代码兼容）
+    const accountId = target;
+    const from = source;
+    const chatId = groupId || target;
+    const agentCount = stepTotalAgents;
+    const currentAgentId = stepId;
+    const routingId = originalRoutingId;
+    const messageId = originalMetadata?.messageId;
+    const originalMessageId = messageId;
     // 添加模型配置到 cfg
     const cfg = {
         ...originalCfg,

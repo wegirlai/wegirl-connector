@@ -18,21 +18,36 @@ type ReplyPayload = {
 type ReplyDispatchKind = "tool" | "block" | "final";
 
 interface SessionsSendOptions {
+  // 核心消息字段（与 wegirl_send 标准一致）
+  /** 消息内容 */
   message: string;
+  /** 来源 StaffId */
+  source: string;
+  /** 目标 StaffId（agent accountId） */
+  target: string;
+  /** 聊天类型 */
+  chatType: string;
+  /** 群聊ID（chatType='group' 时必填） */
+  groupId?: string;
+  /** 路由追踪ID */
+  routingId?: string;
+  /** 任务ID */
+  taskId?: string;
+  /** 步骤ID */
+  stepId?: string;
+  /** 步骤总 Agent 数 */
+  stepTotalAgents?: number;
+  /** 消息类型 */
+  msgType?: string;
+  /** 额外载荷 */
+  payload?: Record<string, any>;
+  /** 元数据 */
+  metadata?: any;
+
+  // V1 内部字段
   cfg: any;
   channel: string;
-  accountId: string;
-  from: string;
-  chatId: string;
-  chatType: string;
   log?: any;
-  routingId?: string;     // 原始消息的路由ID（用于回复关联）
-  messageId?: string;     // 原始消息ID（用于回复关联）
-  metadata?: any;         // 原始消息的元数据（包含 feishuOpenId 等）
-  // 群聊多 agent 任务参数
-  taskId?: string;        // 多 agent 任务标识
-  agentCount?: number;    // 总 agent 数
-  currentAgentId?: string; // 当前 agent 标识（用于结果区分）
 }
 
 // Redis 连接缓存
@@ -80,7 +95,17 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg: originalCfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId, routingId: originalRoutingId, messageId: originalMessageId, metadata: originalMetadata } = options;
+  const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata } = options;
+
+  // 内部变量映射（保持与旧代码兼容）
+  const accountId = target;
+  const from = source;
+  const chatId = groupId || target;
+  const agentCount = stepTotalAgents;
+  const currentAgentId = stepId;
+  const routingId = originalRoutingId;
+  const messageId = originalMetadata?.messageId;
+  const originalMessageId = messageId;
 
   // 添加模型配置到 cfg
   const cfg = {

@@ -274,22 +274,22 @@ export class WeGirlTools {
                 // 关键：私聊调用其他 agent 时，清空 chatId 触发广播模式
                 // 群聊时保留 chatId，让回复回到群里
                 const isGroupChat = params.chatType === 'group';
-                const effectiveChatId = isGroupChat ? (params.chatId || '') : '';
                 wegirlSessionsSend({
                     message: params.message,
-                    cfg: fullCfg, // 使用完整配置
-                    channel: 'wegirl', // 关键：强制使用 'wegirl' 确保回复能正确路由
-                    accountId: agentId, // 关键：使用目标 agentId（scout），不是 senderAccountId
-                    from: senderId,
-                    chatId: effectiveChatId, // 群聊保留，私聊清空触发广播
-                    chatType: params.chatType || 'direct', // 使用 direct 避免 group 路由
+                    source: senderId,
+                    target: agentId,
+                    chatType: params.chatType || 'direct',
+                    groupId: isGroupChat ? (params.chatId || undefined) : undefined,
                     // 关键：设置 metadata，让回复能路由回发送者
                     metadata: {
-                        originatingChannel: replyChannel, // 实际回复目标 channel
+                        originatingChannel: replyChannel,
                         originatingTo: replyTo,
                         originatingAccountId: replyAccountId,
                         replyTo: replyTo,
                     },
+                    // V1 内部字段
+                    cfg: fullCfg,
+                    channel: 'wegirl',
                     log: this.logger
                 }).catch((err) => {
                     this.logger.error(`[WeGirlTools] wegirlSessionsSend failed:`, err.message);

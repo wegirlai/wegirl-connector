@@ -181,23 +181,25 @@ export const wegirlPlugin = {
             log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}`);
             
             // 直接调用 V1 核心层 wegirlSessionsSend，跳过 V2 转换
-            // 将 V2 格式映射到 V1 格式
+            // 参数名与 wegirl_send 标准保持一致
             try {
               await wegirlSessionsSend({
                 message,
+                source,              // V2 source
+                target,              // V2 target
+                chatType: chatType === 'group' ? 'group' : 'direct',
+                groupId: data.chatId || data.metadata?.feishuChatId,
+                routingId: routingId || `wegirl-${Date.now()}`,
+                taskId: data.taskId,
+                stepId: data.stepId,
+                stepTotalAgents: data.stepTotalAgents,
+                msgType: data.msgType,
+                payload: data.payload,
+                metadata: data.metadata,
+                // V1 内部字段
                 cfg,
                 channel: 'wegirl',
-                accountId: target,  // V2 target 对应 V1 accountId (agent ID)
-                from: source,       // V2 source 对应 V1 from (human/agent ID)
-                chatId: data.chatId || data.metadata?.feishuChatId || target,
-                chatType: chatType === 'group' ? 'group' : 'direct',
                 log,
-                routingId: routingId || `wegirl-${Date.now()}`,
-                messageId: data.messageId,
-                metadata: data.metadata,
-                taskId: data.taskId,
-                agentCount: data.stepTotalAgents,
-                currentAgentId: data.stepId,
               });
               log.info(`[WeGirl Channel]<${id}> Message delivered via wegirlSessionsSend: target=${target}`);
             } catch (sendErr: any) {
