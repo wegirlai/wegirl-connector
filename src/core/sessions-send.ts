@@ -98,9 +98,6 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
   const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata } = options;
 
-  // 内部变量映射（保持与旧代码兼容）
-  const accountId = target;
-  const from = source;
   const chatId = groupId || target;
   const agentCount = stepTotalAgents;
   const currentAgentId = stepId;
@@ -118,7 +115,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     },
   };
 
-  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
+  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
 
   // 获取 PluginRuntime
   const runtime = getWeGirlRuntime();
@@ -153,7 +150,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const resolveParams: any = {
       cfg,
       channel,
-      accountId,
+      accountId: target,
     };
     if (chatId) {
       resolveParams.peer = {
@@ -165,7 +162,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
     // 检查 route 是否为空
     if (!route || !route.agentId) {
-      log?.error?.(`[WeGirl SessionsSend] Failed to resolve agent route: channel=${channel}, accountId=${accountId}, chatId=${chatId}`);
+      log?.error?.(`[WeGirl SessionsSend] Failed to resolve agent route: channel=${channel}, target=${target}, chatId=${chatId}`);
       return;
     }
 
@@ -187,8 +184,8 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       forwardMsg = {
         // 标准 V2 字段
         flowType: 'H2A',
-        source: from,
-        target: accountId,
+        source: source,
+        target: target,
         message,
         chatType,
         groupId: chatType === 'group' ? chatId : undefined,
@@ -217,7 +214,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // 3. 构建 envelope
     const body = runtime.channel.reply.formatAgentEnvelope({
       channel: '微妞AI',
-      from: from,
+      from: source,
       timestamp: new Date(),
       body: message,
     });
@@ -231,28 +228,28 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       BodyForAgent: message,
       RawBody: message,
       CommandBody: message,
-      From: from,
+      From: source,
       To: chatId,
       SessionKey: sessionKey,
-      AccountId: accountId,
+      AccountId: target,
       Provider: 'wegirl',
       Surface: 'wegirl',
       ChatType: chatType,
       GroupSubject: chatType === 'group' ? chatId : undefined,
-      SenderId: from,
-      SenderName: from,
+      SenderId: source,
+      SenderName: source,
       MessageSid: messageId,
       Timestamp: Date.now(),
       WasMentioned: true,
       CommandAuthorized: true,
       // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
       OriginatingChannel: originalMetadata?.originatingChannel || channel,
-      OriginatingTo: originalMetadata?.originatingTo || from,
+      OriginatingTo: originalMetadata?.originatingTo || source,
       // 强制指定模型，避免使用默认的 anthropic
       Model: 'kimi-coding/k2p5',
     });
 
-    log?.info?.(`[WeGirl SessionsSend] dispatching to agent (session=${sessionKey}, replyTo=${channel}:${accountId})`);
+    log?.info?.(`[WeGirl SessionsSend] dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
 
     // 创建 dispatcher，处理 Agent 回复
     // 当 channel="wegirl" 时，通过 outbound 发送；其他情况交由 Gateway 自动路由
@@ -295,7 +292,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             const replyMessage = {
               // 标准 V2 字段
               flowType: 'A2H',
-              source: accountId,
+              source: target,
               target: chatId, // 群聊时为目标群
               message: text,
               chatType: 'group',
@@ -307,13 +304,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 feishuOpenId: originalMetadata?.feishuOpenId 
                   || originalMetadata?.fromUserOpenId 
                   || originalMetadata?.feishu_open_id
-                  || from,
+                  || source,
               },
               // 元数据
               metadata: {
                 inReplyTo: messageId,
                 replyStatus,
-                agentId: accountId,
+                agentId: target,
                 sessionKey,
                 taskId,
                 isFinal: true,
@@ -323,7 +320,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               timestamp: Date.now(),
             };
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${accountId}`);
+            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}`);
 
             return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
@@ -352,7 +349,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           const replyMessage = {
             // 标准 V2 字段
             flowType: 'A2H',
-            source: accountId,
+            source: target,
             target: chatId,
             message: text,
             chatType,
@@ -361,15 +358,15 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             msgType: 'message',
             // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
             payload: {
-              feishuOpenId: originalMetadata?.feishuOpenId 
-                || originalMetadata?.fromUserOpenId 
+              feishuOpenId: originalMetadata?.feishuOpenId
+                || originalMetadata?.fromUserOpenId
                 || originalMetadata?.feishu_open_id
-                || from,
+                || source,
             },
             // 元数据
             metadata: {
               inReplyTo: messageId,
-              agentId: accountId,
+              agentId: target,
               sessionKey,
               status: 'completed',
               isFinal: true,
@@ -393,7 +390,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               const errorReply = {
                 // 标准 V2 字段
                 flowType: 'A2H',
-                source: accountId,
+                source: target,
                 target: chatId,
                 message: '',
                 chatType,
@@ -403,7 +400,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 // 元数据
                 metadata: {
                   inReplyTo: messageId,
-                  agentId: accountId,
+                  agentId: target,
                   sessionKey,
                   status: 'failed',
                   isFinal: true,
