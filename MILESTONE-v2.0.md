@@ -205,6 +205,21 @@ payload: {
 
 ---
 
+## 版本迭代
+
+### v2.0.20 (2026-03-21)
+**HR 入职流程优化**
+
+- `create_staff` 参数格式简化：`message`/`userId`/`userName`/`userOpenId`
+- 从 `hr_manage` 中删除 `create_agent`/`delete_agent` action
+- action 名称改为 HR 术语：`list_agents` → `list_staffs`，`get_agent` → `get_staff`
+- 日志格式统一为模板字符串
+- 删除 `wegirl-reply-debug.json` 文件输出
+- 日志前缀统一：`[hr_manage:process_message]` → `[hr_manage:create_staff]`
+- GitHub 提交: `4d3b8c4`
+
+---
+
 ## 升级指南
 
 ### 从 v1.x 升级到 v2.0
