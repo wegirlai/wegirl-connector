@@ -32,15 +32,15 @@ export const wegirlPlugin = {
 
       resolveAccount: (cfg: any, id: string | null) => {
         const accountId = id || 'default';
-        const channelCfg = cfg?.channels?.['wegirl'] || {};
-        const accountCfg = channelCfg?.accounts?.[accountId] || {};
+        // 统一从 openclaw.json 的 plugins.wegirl.config 读取
+        const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
         return {
           accountId,
-          redisUrl: accountCfg?.redisUrl || channelCfg?.redisUrl || cfg?.redisUrl || process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`,
-          redisPassword: accountCfg?.redisPassword || channelCfg?.redisPassword || cfg?.redisPassword || process.env.REDIS_PASSWORD,
-          redisDb: accountCfg?.redisDb !== undefined ? accountCfg.redisDb : channelCfg?.redisDb !== undefined ? channelCfg.redisDb : cfg?.redisDb !== undefined ? cfg.redisDb : 1,
-          channel: accountCfg?.channel || channelCfg?.channel || 'wegirl:messages',
-          enabled: accountCfg?.enabled !== false
+          redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
+          redisPassword: pluginCfg?.redisPassword,
+          redisDb: pluginCfg?.redisDb ?? 1,
+          channel: 'wegirl:messages',
+          enabled: true
         };
       },
       defaultAccountId: () => 'default',
@@ -90,16 +90,11 @@ export const wegirlPlugin = {
 
         log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
 
-        // 优先从 plugin config 读取，其次从 account，最后默认 localhost
-        const redisUrl = cfg?.plugins?.entries?.wegirl?.config?.redisUrl
-          || account?.redisUrl
-          || 'redis://localhost:6379';
-        const password = cfg?.plugins?.entries?.wegirl?.config?.redisPassword
-          || account?.redisPassword
-          || process.env.REDIS_PASSWORD;
-        const db = cfg?.plugins?.entries?.wegirl?.config?.redisDb
-          || account?.redisDb
-          || 1;
+        // 统一从 openclaw.json 的 plugins.wegirl.config 读取 Redis 配置
+        const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
+        const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
+        const password = pluginCfg?.redisPassword;
+        const db = pluginCfg?.redisDb ?? 1;
         
         const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
         const consumerGroup = 'wegirl-consumers';

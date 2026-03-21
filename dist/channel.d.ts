@@ -20,7 +20,7 @@ export declare const wegirlPlugin: {
                 redisUrl: any;
                 redisPassword: any;
                 redisDb: any;
-                channel: any;
+                channel: string;
                 enabled: boolean;
             };
             defaultAccountId: () => string;

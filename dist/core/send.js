@@ -20,11 +20,12 @@ async function getRedisClient() {
         return redisConnectPromise;
     }
     redisConnectPromise = (async () => {
+        // 统一从 openclaw.json 的 plugins.wegirl.config 读取
         const cfg = getWeGirlConfig();
-        const redisUrl = cfg?.redisUrl || process.env.REDIS_URL ||
-            `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`;
-        const password = cfg?.redisPassword || process.env.REDIS_PASSWORD;
-        const db = cfg?.redisDb ?? parseInt(process.env.REDIS_DB || '1');
+        const pluginCfg = cfg || {};
+        const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
+        const password = pluginCfg?.redisPassword;
+        const db = pluginCfg?.redisDb ?? 1;
         const client = new Redis(redisUrl, {
             password,
             db,
