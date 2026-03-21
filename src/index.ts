@@ -328,6 +328,8 @@ const plugin = {
             case 'create_staff': {
               const { message, chatType, userId, userName, userOpenId } = params;
               
+              console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, userId, userName, userOpenId }));
+              
               // 构建标准化的消息对象
               const normalizedMessage = {
                 chatType: chatType || 'p2p',
@@ -337,12 +339,16 @@ const plugin = {
                 fromUserName: userName
               };
               
+              console.log(`[hr_manage:create_staff] 构建消息对象:`, JSON.stringify(normalizedMessage));
+              
               result = await handleProcessMessage(
                 normalizedMessage,
                 redisClient,
                 logger,
                 INSTANCE_ID
               );
+              
+              console.log(`[hr_manage:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
               break;
             }
             case 'list_staffs':
@@ -1043,7 +1049,7 @@ async function handleProcessMessage(
   if (chatType === 'p2p') {
     logger.info(`[hr_manage:create_staff] Private message from ${fromUser}`);
     
-    await handlePrivateMessage(
+    const result = await handlePrivateMessage(
       {
         message: message.message || '',
         userId: fromUser,
@@ -1056,12 +1062,20 @@ async function handleProcessMessage(
       logger,
       instanceId
     );
-    
+
+    // 如果已处理（包括 error），统一发送消息
+    if (result.handled && result.result) {
+      await redis.publish('wegirl:replies', JSON.stringify(result.result));
+      console.log(`[hr_manage:create_staff] Message published to wegirl:replies, msgType=${result.result.msgType}`);
+    }
+
     return {
-      success: true,
+      success: result.handled,
       action: 'process_onboard',
       userId: fromUser,
-      message: '私聊消息已处理（入职绑定流程）'
+      message: result.handled 
+        ? (result.error ? '入职信息处理失败' : '入职消息已发送')
+        : '未识别为入职消息'
     };
   }
   

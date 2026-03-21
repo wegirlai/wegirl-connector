@@ -71,6 +71,11 @@ export declare function generateOnboardPrompt(userName?: string): string;
 export declare function handleMentionMessage(context: MentionContext, redis: Redis, logger: any, instanceId: string): Promise<void>;
 /**
  * 处理私聊消息 - 入职绑定流程
+ * 返回结果，不直接发送消息，统一由 deliver 处理
  */
-export declare function handlePrivateMessage(context: PrivateMessageContext, redis: Redis, logger: any, instanceId: string): Promise<void>;
+export declare function handlePrivateMessage(context: PrivateMessageContext, redis: Redis, logger: any, instanceId: string): Promise<{
+    handled: boolean;
+    result?: any;
+    error?: string;
+}>;
 //# sourceMappingURL=hr-message-handler.d.ts.map
