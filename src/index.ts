@@ -1060,8 +1060,8 @@ async function handleProcessMessage(
     const messageObj = await handlePrivateMessage(
       {
         message: message.message || '',
-        source: source,
-        target: target,
+        userId: source,  // 用户ID (oc_xxx)
+        agentId: target,  // hr
       },
       redis,
       logger,

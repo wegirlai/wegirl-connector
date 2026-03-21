@@ -29,8 +29,8 @@ export interface MentionContext {
 }
 export interface PrivateMessageContext {
     message: string;
-    source: string;
-    target?: string;
+    userId: string;
+    agentId?: string;
 }
 /**
  * 检查 identifier 是否是 agent

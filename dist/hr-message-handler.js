@@ -232,20 +232,20 @@ export async function handleMentionMessage(context, redis, logger, instanceId) {
  * 返回消息对象，未处理返回 null
  */
 export async function handlePrivateMessage(context, redis, logger, instanceId) {
-    const { message, source, target } = context;
-    if (!source) {
+    const { message, userId, agentId } = context;
+    if (!userId) {
         logger.warn('[HR] Empty userId in private message');
         return null;
     }
-    logger.info(`[HR] Private message from ${source}: ${message?.substring(0, 50)}`);
+    logger.info(`[HR] Private message from ${userId}: ${message?.substring(0, 50)}`);
     // 1. 检查是否是入职请求（但没有数据）
     if (isOnboardRequest(message) && !isOnboardFormat(message)) {
-        logger.info(`[HR] Onboard request without data from ${source}`);
+        logger.info(`[HR] Onboard request without data from ${userId}`);
         // 返回入职登记表
         return {
             flowType: 'A2H',
-            source: 'hr',
-            target: source,
+            source: agentId || 'hr',
+            target: userId,
             message: generateOnboardPrompt(""),
             chatType: 'direct',
             msgType: 'message',
@@ -257,15 +257,15 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
     console.log(`[HR] Checking onboard format for: ${message?.substring(0, 50)}`);
     console.log(`[HR] isOnboardFormat result: ${isOnboardFormat(message)}`);
     if (isOnboardFormat(message)) {
-        logger.info(`[HR] Onboard format detected from ${source}`);
+        logger.info(`[HR] Onboard format detected from ${userId}`);
         const data = parseOnboardData(message);
         console.log(`[HR] parseOnboardData result:`, JSON.stringify(data));
         if (!data.valid) {
             // 返回错误消息
             return {
                 flowType: 'A2H',
-                source: 'hr',
-                target: source,
+                source: agentId || 'hr',
+                target: userId,
                 message: `❌ 信息格式错误：${data.error}\n\n请按以下格式重新发送：\n\`\`\`\n工号：xxx（只能包含小写字母、数字、-、_）\n姓名：xxx\n电话：xxx（选填）\n角色：xxx（选填）\n能力：xxx, xxx（选填）\n\`\`\``,
                 chatType: 'direct',
                 msgType: 'error',
@@ -280,8 +280,8 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
             // 返回冲突错误消息
             return {
                 flowType: 'A2H',
-                source: 'hr',
-                target: source,
+                source: agentId || 'hr',
+                target: userId,
                 message: `❌ StaffID "${data.staffId}" 已被占用，请选择其他 ID`,
                 chatType: 'direct',
                 msgType: 'error',
@@ -293,8 +293,8 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         // 3. 发送入职数据（标准 V2 格式）
         return {
             flowType: 'A2S',
-            source: 'hr',
-            target: source,
+            source: agentId || 'hr',
+            target: userId,
             message: `收到新员工入职申请：${data.name} (${data.staffId})`,
             chatType: 'direct',
             msgType: 'onboard_human',
@@ -304,14 +304,14 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
                 name: data.name,
                 phone: data.phone,
                 role: data.role,
-                openId: source,
+                openId: userId,
                 capabilities: data.capabilities,
             },
             timestamp: Date.now(),
         };
     }
     // 3. 其他消息，未处理
-    logger.info(`[HR] Ignoring non-onboard message from ${source}`);
+    logger.info(`[HR] Ignoring non-onboard message from ${userId}`);
     return null;
 }
 function randomUUID() {

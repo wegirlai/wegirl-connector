@@ -889,8 +889,8 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
         logger.info(`[hr_manage:create_staff] Private message from ${source}`);
         const messageObj = await handlePrivateMessage({
             message: message.message || '',
-            source: source,
-            target: target,
+            userId: source, // 用户ID (oc_xxx)
+            agentId: target, // hr
         }, redis, logger, instanceId);
         // 统一 publish 消息（如果 handlePrivateMessage 返回了消息对象）
         if (messageObj) {
