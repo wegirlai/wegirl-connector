@@ -1,7 +1,7 @@
 // src/channel.ts - Channel Plugin 定义
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
-import { wegirlSend } from './core/index.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 const KEY_PREFIX = 'wegirl:';
 export const wegirlPlugin = {
     plugin: {
@@ -162,50 +162,30 @@ export const wegirlPlugin = {
                             return;
                         }
                         log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}`);
-                        // Parse replyTo - 支持字符串、JSON数组，或特殊值 'NO_REPLY'
-                        let parsedReplyTo = undefined;
-                        if (replyTo) {
-                            if (typeof replyTo === 'string') {
-                                // 尝试解析为 JSON，如果是数组；否则作为普通字符串
-                                if (replyTo === 'NO_REPLY') {
-                                    parsedReplyTo = 'NO_REPLY';
-                                }
-                                else if (replyTo.startsWith('[')) {
-                                    try {
-                                        parsedReplyTo = JSON.parse(replyTo);
-                                    }
-                                    catch {
-                                        parsedReplyTo = replyTo; // 解析失败，作为普通字符串
-                                    }
-                                }
-                                else {
-                                    parsedReplyTo = replyTo; // 普通字符串（如 open_id）
-                                }
-                            }
-                            else {
-                                parsedReplyTo = replyTo;
-                            }
+                        // 直接调用 V1 核心层 wegirlSessionsSend，跳过 V2 转换
+                        // 将 V2 格式映射到 V1 格式
+                        try {
+                            await wegirlSessionsSend({
+                                message,
+                                cfg,
+                                channel: 'wegirl',
+                                accountId: target, // V2 target 对应 V1 accountId (agent ID)
+                                from: source, // V2 source 对应 V1 from (human/agent ID)
+                                chatId: data.chatId || data.metadata?.feishuChatId || target,
+                                chatType: chatType === 'group' ? 'group' : 'direct',
+                                log,
+                                routingId: routingId || `wegirl-${Date.now()}`,
+                                messageId: data.messageId,
+                                metadata: data.metadata,
+                                taskId: data.taskId,
+                                agentCount: data.stepTotalAgents,
+                                currentAgentId: data.stepId,
+                            });
+                            log.info(`[WeGirl Channel]<${id}> Message delivered via wegirlSessionsSend: target=${target}`);
                         }
-                        const result = await wegirlSend({
-                            flowType,
-                            source,
-                            target,
-                            message,
-                            chatType,
-                            groupId: groupId || undefined,
-                            replyTo: parsedReplyTo,
-                            taskId: data.taskId || undefined,
-                            stepId: data.stepId || undefined,
-                            stepTotalAgents: data.stepTotalAgents ? parseInt(data.stepTotalAgents) : undefined,
-                            routingId,
-                            msgType: data.msgType || 'message',
-                            payload: data.payload ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : undefined,
-                        }, log);
-                        if (result.success) {
-                            log.info(`[WeGirl Channel]<${id}> Message delivered: ${result.routingId}, local=${result.local}`);
-                        }
-                        else {
-                            log.error(`[WeGirl Channel]<${id}> Message failed: ${result.error}`);
+                        catch (sendErr) {
+                            log.error(`[WeGirl Channel]<${id}> wegirlSessionsSend failed:`, sendErr.message);
+                            throw sendErr; // 向上抛出，触发 ACK 和错误处理
                         }
                     }
                     catch (err) {
