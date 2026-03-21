@@ -299,18 +299,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               groupId: groupId,
               routingId,
               msgType: 'message',
-              // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
-              payload: {
-                feishuOpenId: originalMetadata?.feishuOpenId
-                  || originalMetadata?.fromUserOpenId
-                  || originalMetadata?.feishu_open_id
-                  || source,
-              },
               // 元数据
               metadata: {
-                inReplyTo: messageId,
                 replyStatus,
-                agentId: target,
                 sessionKey,
                 taskId,
                 isFinal: true,
