@@ -260,10 +260,6 @@ const plugin = {
                             type: 'string',
                             description: '用户显示名称（可选，如：张三）'
                         },
-                        senderOpenId: {
-                            type: 'string',
-                            description: '用户的 Feishu Open ID（格式：oc_xxxx），用于飞书消息发送'
-                        },
                         groupId: {
                             type: 'string',
                             description: '群聊ID（chatType=group 时必填）'
@@ -300,8 +296,8 @@ const plugin = {
                     let result;
                     switch (action) {
                         case 'create_staff': {
-                            const { message, chatType, source, target, senderName, senderOpenId, groupId, routingId } = params;
-                            console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, senderOpenId, groupId, routingId }));
+                            const { message, chatType, source, target, senderName, groupId, routingId } = params;
+                            console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, groupId, routingId }));
                             // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
                             const normalizedMessage = {
                                 chatType: chatType || 'direct',
