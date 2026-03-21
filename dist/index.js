@@ -326,6 +326,13 @@ const plugin = {
                             throw new Error(`未知操作: ${action}`);
                     }
                     logger.info(`[hr_manage] action=${action} 执行完成`);
+                    // create_staff 统一返回空 content，由 redis.publish 发送消息，deliver 不触发
+                    if (action === 'create_staff') {
+                        return {
+                            content: [], // 空 content，deliver 不会发送
+                            details: result
+                        };
+                    }
                     // 返回 OpenClaw 期望的格式
                     return {
                         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -881,7 +888,7 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
     // 1. 私聊消息 → 入职绑定流程
     if (chatType === 'p2p') {
         logger.info(`[hr_manage:create_staff] Private message from ${fromUser}`);
-        const result = await handlePrivateMessage({
+        const messageObj = await handlePrivateMessage({
             message: message.message || '',
             userId: fromUser,
             userName: senderName,
@@ -889,21 +896,15 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
             chatId: message.chatId || message.chat_id || fromUser,
             chatType: chatType,
         }, redis, logger, instanceId);
-        // 如果已处理（包括 error），统一发送消息
-        if (result.handled && result.result) {
-            await redis.publish('wegirl:replies', JSON.stringify(result.result));
-            console.log(`[hr_manage:create_staff] Message published to wegirl:replies, msgType=${result.result.msgType}`);
+        // 统一 publish 消息（如果 handlePrivateMessage 返回了消息对象）
+        if (messageObj) {
+            await redis.publish('wegirl:replies', JSON.stringify(messageObj));
+            console.log(`[hr_manage:create_staff] Message published to wegirl:replies, msgType=${messageObj.msgType}`);
         }
+        // 返回空 content，deliver 不会发送
         return {
-            success: result.handled,
-            action: 'process_onboard',
-            userId: fromUser,
-            status: result.handled
-                ? (result.error ? 'error' : 'sent')
-                : 'ignored',
-            note: result.handled
-                ? (result.error ? '入职信息处理失败' : '消息已通过 deliver 发送')
-                : '未识别为入职消息'
+            content: [],
+            details: { handled: !!messageObj }
         };
     }
     // 2. 群聊 @ 消息 → 判断是 agent 还是人类

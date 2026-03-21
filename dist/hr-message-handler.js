@@ -229,31 +229,28 @@ export async function handleMentionMessage(context, redis, logger, instanceId) {
 }
 /**
  * 处理私聊消息 - 入职绑定流程
- * 返回结果，不直接发送消息，统一由 deliver 处理
+ * 返回消息对象，未处理返回 null
  */
 export async function handlePrivateMessage(context, redis, logger, instanceId) {
     const { message, userId, userName, feishuOpenId, chatId, chatType } = context;
     if (!userId) {
         logger.warn('[HR] Empty userId in private message');
-        return { handled: false };
+        return null;
     }
     logger.info(`[HR] Private message from ${userId}: ${message?.substring(0, 50)}`);
     // 1. 检查是否是入职请求（但没有数据）
     if (isOnboardRequest(message) && !isOnboardFormat(message)) {
         logger.info(`[HR] Onboard request without data from ${userId}`);
-        // 返回入职登记表，由 deliver 统一发送
+        // 返回入职登记表
         return {
-            handled: true,
-            result: {
-                flowType: 'A2H',
-                source: 'hr',
-                target: feishuOpenId || userId,
-                message: generateOnboardPrompt(userName),
-                chatType: 'direct',
-                msgType: 'message',
-                routingId: randomUUID(),
-                timestamp: Date.now(),
-            }
+            flowType: 'A2H',
+            source: 'hr',
+            target: feishuOpenId || userId,
+            message: generateOnboardPrompt(userName),
+            chatType: 'direct',
+            msgType: 'message',
+            routingId: randomUUID(),
+            timestamp: Date.now(),
         };
     }
     // 2. 检查是否是入职数据格式
@@ -264,70 +261,59 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         const data = parseOnboardData(message);
         console.log(`[HR] parseOnboardData result:`, JSON.stringify(data));
         if (!data.valid) {
-            // 返回错误，由 deliver 统一处理
+            // 返回错误消息
             return {
-                handled: true,
-                error: data.error,
-                result: {
-                    flowType: 'A2H',
-                    source: 'hr',
-                    target: feishuOpenId || userId,
-                    message: `❌ 信息格式错误：${data.error}\n\n请按以下格式重新发送：\n\`\`\`\n工号：xxx（只能包含小写字母、数字、-、_）\n姓名：xxx\n电话：xxx（选填）\n角色：xxx（选填）\n能力：xxx, xxx（选填）\n\`\`\``,
-                    chatType: 'direct',
-                    msgType: 'error',
-                    routingId: randomUUID(),
-                    timestamp: Date.now(),
-                }
+                flowType: 'A2H',
+                source: 'hr',
+                target: feishuOpenId || userId,
+                message: `❌ 信息格式错误：${data.error}\n\n请按以下格式重新发送：\n\`\`\`\n工号：xxx（只能包含小写字母、数字、-、_）\n姓名：xxx\n电话：xxx（选填）\n角色：xxx（选填）\n能力：xxx, xxx（选填）\n\`\`\``,
+                chatType: 'direct',
+                msgType: 'error',
+                routingId: randomUUID(),
+                timestamp: Date.now(),
             };
         }
         // 检查 StaffID 是否被占用
         const existing = await redis.hgetall(`${KEY_PREFIX}staff:${data.staffId}`);
         console.log(`[HR] Check existing staff ${data.staffId}:`, JSON.stringify(existing));
         if (existing && existing.staffId) {
-            // 返回错误，由 deliver 统一处理
+            // 返回冲突错误消息
             return {
-                handled: true,
-                error: 'staff_id_conflict',
-                result: {
-                    flowType: 'A2H',
-                    source: 'hr',
-                    target: feishuOpenId || userId,
-                    message: `❌ StaffID "${data.staffId}" 已被占用，请选择其他 ID`,
-                    chatType: 'direct',
-                    msgType: 'error',
-                    routingId: randomUUID(),
-                    timestamp: Date.now(),
-                }
+                flowType: 'A2H',
+                source: 'hr',
+                target: feishuOpenId || userId,
+                message: `❌ StaffID "${data.staffId}" 已被占用，请选择其他 ID`,
+                chatType: 'direct',
+                msgType: 'error',
+                routingId: randomUUID(),
+                timestamp: Date.now(),
             };
         }
         console.log(`[HR] StaffID ${data.staffId} is available, preparing to publish`);
         // 3. 发送入职数据（标准 V2 格式）
         return {
-            handled: true,
-            result: {
-                flowType: 'A2S',
-                source: 'hr',
-                target: 'default',
-                message: `收到新员工入职申请：${data.name} (${data.staffId})`,
-                chatType: 'direct',
-                msgType: 'onboard_human',
-                routingId: randomUUID(),
-                payload: {
-                    staffId: data.staffId,
-                    name: data.name,
-                    phone: data.phone,
-                    role: data.role,
-                    capabilities: data.capabilities,
-                    feishuOpenId: feishuOpenId || userId,
-                    sourceUserId: userId,
-                },
-                timestamp: Date.now(),
-            }
+            flowType: 'A2S',
+            source: 'hr',
+            target: 'default',
+            message: `收到新员工入职申请：${data.name} (${data.staffId})`,
+            chatType: 'direct',
+            msgType: 'onboard_human',
+            routingId: randomUUID(),
+            payload: {
+                staffId: data.staffId,
+                name: data.name,
+                phone: data.phone,
+                role: data.role,
+                capabilities: data.capabilities,
+                feishuOpenId: feishuOpenId || userId,
+                sourceUserId: userId,
+            },
+            timestamp: Date.now(),
         };
     }
     // 3. 其他消息，未处理
     logger.info(`[HR] Ignoring non-onboard message from ${userId}`);
-    return { handled: false };
+    return null;
 }
 function randomUUID() {
     return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

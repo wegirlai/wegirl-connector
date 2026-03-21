@@ -193,6 +193,12 @@ export async function wegirlSessionsSend(options) {
                 if (info?.kind !== 'final' || !text.trim()) {
                     return;
                 }
+                // ===== HR Agent 特殊处理 =====
+                // HR agent 的回复通过 hr_manage 工具内部处理，这里不发送
+                if (agentId === 'hr' || agentId === 'HR') {
+                    log?.info?.(`[WeGirl SessionsSend] HR agent reply skipped, handled by hr_manage internally`);
+                    return;
+                }
                 // ========== 群聊多 agent 处理 ==========
                 // 每个 agent 完成时立即回复（不等待聚合）
                 if (chatType === 'group' && taskId && agentCount && agentCount > 1) {
