@@ -262,7 +262,7 @@ const plugin = {
                         },
                         senderOpenId: {
                             type: 'string',
-                            description: '用户的 Feishu Open ID，格式为 "oc_xxxx"（与 source 相同，可选）'
+                            description: '用户的 Feishu Open ID（格式：oc_xxxx），用于飞书消息发送'
                         },
                         groupId: {
                             type: 'string',
@@ -270,11 +270,11 @@ const plugin = {
                         },
                         source: {
                             type: 'string',
-                            description: '来源用户的 Feishu Open ID，格式为 "oc_xxxx"（飞书用户的 Open ID，不是 user_id）'
+                            description: '来源用户的 StaffId（如：hr, human:tiger, agent:scout）'
                         },
                         target: {
                             type: 'string',
-                            description: '目标接收者，固定为 "hr"（表示人事专员处理）',
+                            description: '目标接收者的 StaffId，固定为 "hr"（表示人事专员处理）',
                             default: 'hr'
                         },
                         chatType: {
