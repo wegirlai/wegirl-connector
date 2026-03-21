@@ -259,17 +259,24 @@ export class WeGirlTools {
                 // 关键：chatId 设为空，避免 peer 影响路由判断
                 // 关键：accountId 应该是目标 agentId（如 scout），用于匹配 binding
                 // 关键：加载完整配置，包含 bindings
-                const fullCfg = loadOpenClawConfig() || {
-                    channels: {
-                        wegirl: {
-                            accounts: {
-                                [replyAccountId]: {
-                                    enabled: true,
-                                    redisUrl: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`
-                                }
-                            }
-                        }
-                    }
+                const fullCfg = loadOpenClawConfig() || { channels: {} };
+                // 从 plugin config 获取 Redis 配置
+                const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
+                const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
+                const redisPassword = pluginCfg?.redisPassword;
+                const redisDb = pluginCfg?.redisDb ?? 1;
+                // 确保 channels.wegirl.accounts 存在
+                if (!fullCfg.channels.wegirl) {
+                    fullCfg.channels.wegirl = { accounts: {} };
+                }
+                if (!fullCfg.channels.wegirl.accounts) {
+                    fullCfg.channels.wegirl.accounts = {};
+                }
+                fullCfg.channels.wegirl.accounts[replyAccountId] = {
+                    enabled: true,
+                    redisUrl,
+                    redisPassword,
+                    redisDb
                 };
                 // 关键：私聊调用其他 agent 时，清空 chatId 触发广播模式
                 // 群聊时保留 chatId，让回复回到群里

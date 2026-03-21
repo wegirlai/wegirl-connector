@@ -136,18 +136,20 @@ export async function executeCreateAgent(params, ctx) {
         if (!bindingExists) {
             config.bindings.push(binding);
         }
-        // 添加 wegirl account
+        // 添加 wegirl account - 复用现有的 plugin 配置
         if (!config.channels)
             config.channels = {};
         if (!config.channels.wegirl)
             config.channels.wegirl = { accounts: {} };
         if (!config.channels.wegirl.accounts)
             config.channels.wegirl.accounts = {};
+        // 从 plugin config 获取 Redis 配置（已存在的配置）
+        const pluginCfg = config?.plugins?.entries?.wegirl?.config || {};
         config.channels.wegirl.accounts[accountId] = {
             enabled: true,
-            redisUrl: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || '6379'}`,
-            redisPassword: process.env.REDIS_PASSWORD || '',
-            redisDb: parseInt(process.env.REDIS_DB || '1', 10)
+            redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
+            redisPassword: pluginCfg?.redisPassword,
+            redisDb: pluginCfg?.redisDb ?? 1
         };
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         results.metadata.configUpdated = true;
