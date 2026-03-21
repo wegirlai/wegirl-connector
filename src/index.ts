@@ -53,7 +53,7 @@ const plugin = {
 
   register(context: PluginContext): void {
     const logger = context.logger;
-    
+
     // 直接读取 openclaw.json 配置
     const fullConfig = loadOpenClawConfig();
     const pluginConfig = fullConfig?.plugins?.entries?.wegirl?.config || {};
@@ -70,7 +70,7 @@ const plugin = {
     } else {
       logger.error('[WeGirl] No runtime in context!');
     }
-    
+
     // 保存 PluginConfig（用于兼容性）
     setWeGirlConfig(pluginConfig);
     logger.info('[WeGirl] PluginConfig saved to global');
@@ -250,7 +250,7 @@ const plugin = {
         },
         execute: async (_toolCallId: string, params: any) => {
           logger.info(`[wegirl_send] 调用: ${JSON.stringify(params)}`);
-          
+
           try {
             const result = await wegirlSend(params, logger);
             return {
@@ -282,15 +282,7 @@ const plugin = {
               enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff'],
               description: '操作类型'
             },
-            accountId: {
-              type: 'string',
-              description: 'Agent account ID（delete_agent 时使用）'
-            },
-            command: {
-              type: 'string',
-              enum: ['onboard_user', 'update_user', 'sync_agents', 'notify_user'],
-              description: '命令类型（send_command 时使用）'
-            },
+
             payload: {
               type: 'object',
               description: '命令参数（send_command 时使用）'
@@ -311,24 +303,12 @@ const plugin = {
             chatType: {
               type: 'string',
               enum: ['direct', 'group'],
-              description: '聊天类型（create_staff 时使用，对应 SessionsSendOptions.chatType）',
+              description: '聊天类型',
               default: 'direct'
-            },
-            senderName: {
-              type: 'string',
-              description: '发送者显示名（create_staff 时使用，可选，原 userName）'
-            },
-            senderOpenId: {
-              type: 'string',
-              description: '发送者 OpenId（create_staff 时使用，可选，原 userOpenId）'
-            },
-            groupId: {
-              type: 'string',
-              description: '群聊ID（chatType=group 时使用，对应 SessionsSendOptions.groupId）'
             },
             routingId: {
               type: 'string',
-              description: '路由追踪ID（可选，对应 SessionsSendOptions.routingId）'
+              description: '路由追踪ID'
             }
           },
           required: ['action']
@@ -346,30 +326,28 @@ const plugin = {
           switch (action) {
             case 'create_staff': {
               const { message, chatType, source, target, senderName, senderOpenId, groupId, routingId } = params;
-              
+
               console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, senderOpenId, groupId, routingId }));
-              
+
               // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
               const normalizedMessage = {
                 chatType: chatType || 'direct',
-                from: source,                    // 对应 SessionsSendOptions.source
-                message: message,                // 对应 SessionsSendOptions.message
-                fromUserOpenId: senderOpenId || source,  // 对应 senderOpenId
-                fromUserName: senderName,
-                to: target || 'default',         // 对应 SessionsSendOptions.target
-                groupId: groupId,                // 对应 SessionsSendOptions.groupId
-                routingId: routingId             // 对应 SessionsSendOptions.routingId
+                source: source,
+                message: message,
+                target: target,
+                groupId: groupId,
+                routingId: routingId
               };
-              
+
               console.log(`[hr_manage:create_staff] 构建消息对象:`, JSON.stringify(normalizedMessage));
-              
+
               result = await handleProcessMessage(
                 normalizedMessage,
                 redisClient,
                 logger,
                 INSTANCE_ID
               );
-              
+
               console.log(`[hr_manage:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
               break;
             }
@@ -1016,9 +994,9 @@ async function handleSendCommand(
   instanceId: string
 ): Promise<any> {
   const { command, payload } = args;
-  
+
   logger.info(`[hr_manage:send_command] Sending command: ${command}`);
-  
+
   // 构建消息 - 使用标准 V2 格式
   const routingId = randomUUID();
   const message = {
@@ -1039,13 +1017,13 @@ async function handleSendCommand(
     },
     timestamp: Date.now(),
   };
-  
+
   try {
     // 发布到 wegirl:replies channel
     await redis.publish('wegirl:replies', JSON.stringify(message));
-    
+
     logger.info(`[hr_manage:send_command] Command sent to wegirl:replies: ${command}`);
-    
+
     return {
       success: true,
       command: command,
@@ -1069,23 +1047,21 @@ async function handleProcessMessage(
   instanceId: string
 ): Promise<any> {
   logger.info(`[hr_manage:create_staff] Processing message`);
-  
+
   const chatType = message.chatType || message.chat_type;
-  const fromUser = message.from;
-  const senderName = message.senderName || message.fromUserName;
+  const source = message.source;
+  const target = message.target;
   const mentions = message.mentions || message.metadata?.mentions || [];
-  
+
   // 1. 私聊消息 → 入职绑定流程
   if (chatType === 'p2p') {
-    logger.info(`[hr_manage:create_staff] Private message from ${fromUser}`);
-    
+    logger.info(`[hr_manage:create_staff] Private message from ${source}`);
+
     const messageObj = await handlePrivateMessage(
       {
         message: message.message || '',
-        userId: fromUser,
-        userName: senderName,
-        feishuOpenId: message.fromUserOpenId,
-        chatId: message.chatId || message.chat_id || fromUser,
+        source: source,
+        target: target,
         chatType: chatType,
       },
       redis,
@@ -1105,18 +1081,18 @@ async function handleProcessMessage(
       details: { handled: !!messageObj }
     };
   }
-  
+
   // 2. 群聊 @ 消息 → 判断是 agent 还是人类
   if (chatType === 'group' && mentions && mentions.length > 0) {
     logger.info(`[hr_manage:create_staff] Group mention message with ${mentions.length} mentions`);
-    
+
     const results = [];
-    
+
     for (const mention of mentions) {
       const mentionKey = mention.key || mention;
       const mentionId = mention.id || mention;
       const mentionName = mention.name || mention;
-      
+
       const context = {
         mentionKey,
         mentionId,
@@ -1126,15 +1102,15 @@ async function handleProcessMessage(
         fromUser: fromUser,
         senderName: senderName,
       };
-      
+
       await handleMentionMessage(context, redis, logger, instanceId);
-      
+
       results.push({
         mention: mentionId || mentionKey,
         processed: true
       });
     }
-    
+
     return {
       success: true,
       action: 'process_mentions',
@@ -1143,7 +1119,7 @@ async function handleProcessMessage(
       message: `群聊@消息已处理，共 ${mentions.length} 个提及`
     };
   }
-  
+
   // 其他消息类型
   return {
     success: true,
