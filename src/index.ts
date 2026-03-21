@@ -1054,7 +1054,7 @@ async function handleProcessMessage(
   const mentions = message.mentions || message.metadata?.mentions || [];
 
   // 1. 私聊消息 → 入职绑定流程
-  if (chatType === 'p2p') {
+  if ((chatType === 'p2p' || chatType === 'direct') && (!mentions || mentions.length === 0)) {
     logger.info(`[hr_manage:create_staff] Private message from ${source}`);
 
     const messageObj = await handlePrivateMessage(
@@ -1062,7 +1062,6 @@ async function handleProcessMessage(
         message: message.message || '',
         source: source,
         target: target,
-        chatType: chatType,
       },
       redis,
       logger,
@@ -1087,6 +1086,8 @@ async function handleProcessMessage(
     logger.info(`[hr_manage:create_staff] Group mention message with ${mentions.length} mentions`);
 
     const results = [];
+    const fromUser = message.source;
+    const senderName = message.senderName || message.fromUserName || '';
 
     for (const mention of mentions) {
       const mentionKey = mention.key || mention;

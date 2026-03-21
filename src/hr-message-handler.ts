@@ -37,11 +37,8 @@ export interface MentionContext {
 
 export interface PrivateMessageContext {
   message: string;
-  userId: string;
-  userName?: string;
-  feishuOpenId?: string;
-  chatId: string;
-  chatType: string;
+  source: string;
+  target?: string;
 }
 
 /**

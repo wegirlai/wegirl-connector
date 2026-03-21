@@ -29,11 +29,8 @@ export interface MentionContext {
 }
 export interface PrivateMessageContext {
     message: string;
-    userId: string;
-    userName?: string;
-    feishuOpenId?: string;
-    chatId: string;
-    chatType: string;
+    source: string;
+    target?: string;
 }
 /**
  * 检查 identifier 是否是 agent
