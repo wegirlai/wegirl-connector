@@ -9,16 +9,24 @@ export class MessageRouter {
     options;
     subscriber = null;
     isRunning = false;
-    constructor(redis, instanceId, logger) {
+    redisUrl;
+    redisPassword;
+    constructor(redis, instanceId, logger, redisUrl, redisPassword) {
         this.redis = redis;
         this.options = { instanceId, logger };
+        this.redisUrl = redisUrl || 'redis://localhost:6379';
+        this.redisPassword = redisPassword;
     }
     // 启动路由（订阅 Redis 消息）
     async startListening() {
         if (this.isRunning)
             return;
-        // 创建独立订阅客户端
-        this.subscriber = new Redis(this.redis.options);
+        // 创建独立订阅客户端 - 使用原始 URL 和密码
+        const options = {};
+        if (this.redisPassword) {
+            options.password = this.redisPassword;
+        }
+        this.subscriber = new Redis(this.redisUrl, options);
         const instanceChannel = `${INSTANCE_CHANNEL_PREFIX}${this.options.instanceId}`;
         // 订阅实例频道
         await this.subscriber.subscribe(instanceChannel);

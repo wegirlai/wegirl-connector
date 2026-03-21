@@ -10,7 +10,9 @@ export declare class MessageRouter {
     private options;
     private subscriber;
     private isRunning;
-    constructor(redis: Redis, instanceId: string, logger: any);
+    private redisUrl;
+    private redisPassword?;
+    constructor(redis: Redis, instanceId: string, logger: any, redisUrl?: string, redisPassword?: string);
     startListening(): Promise<void>;
     private handleChannelMessage;
     private handleDefaultMessage;

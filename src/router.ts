@@ -28,22 +28,32 @@ export class MessageRouter {
   private options: { instanceId: string; logger: any };
   private subscriber: Redis | null = null;
   private isRunning = false;
+  private redisUrl: string;
+  private redisPassword?: string;
 
   constructor(
     redis: Redis,
     instanceId: string,
-    logger: any
+    logger: any,
+    redisUrl?: string,
+    redisPassword?: string
   ) {
     this.redis = redis;
     this.options = { instanceId, logger };
+    this.redisUrl = redisUrl || 'redis://localhost:6379';
+    this.redisPassword = redisPassword;
   }
 
   // 启动路由（订阅 Redis 消息）
   async startListening(): Promise<void> {
     if (this.isRunning) return;
     
-    // 创建独立订阅客户端
-    this.subscriber = new Redis(this.redis.options);
+    // 创建独立订阅客户端 - 使用原始 URL 和密码
+    const options: any = {};
+    if (this.redisPassword) {
+      options.password = this.redisPassword;
+    }
+    this.subscriber = new Redis(this.redisUrl, options);
     
     const instanceChannel = `${INSTANCE_CHANNEL_PREFIX}${this.options.instanceId}`;
     

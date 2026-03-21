@@ -2,7 +2,8 @@
 // 本地投递统一调用 V1 (sessions-send.ts)
 
 import Redis from 'ioredis';
-import { getWeGirlConfig } from '../runtime.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { wegirlSessionsSend } from './sessions-send.js';
 import type { 
   WeGirlSendOptions, 
@@ -19,6 +20,24 @@ import {
 
 const KEY_PREFIX = 'wegirl:';
 const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
+
+// 缓存 openclaw.json 配置
+let openclawConfig: any = null;
+
+/**
+ * 从 openclaw.json 加载配置
+ */
+function loadOpenClawConfig(): any {
+  if (openclawConfig) return openclawConfig;
+  try {
+    const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+    const content = readFileSync(configPath, 'utf-8');
+    openclawConfig = JSON.parse(content);
+    return openclawConfig;
+  } catch (err: any) {
+    return null;
+  }
+}
 
 // 全局 Redis 连接缓存
 let redisClient: Redis | null = null;
@@ -37,8 +56,8 @@ async function getRedisClient(): Promise<Redis> {
   
   redisConnectPromise = (async () => {
     // 统一从 openclaw.json 的 plugins.wegirl.config 读取
-    const cfg = getWeGirlConfig();
-    const pluginCfg = cfg || {};
+    const cfg = loadOpenClawConfig();
+    const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
     const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
     const password = pluginCfg?.redisPassword;
     const db = pluginCfg?.redisDb ?? 1;
@@ -96,10 +115,8 @@ async function getStaffInfo(
  * 获取当前实例 ID
  */
 function getCurrentInstanceId(): string {
-  const cfg = getWeGirlConfig();
-  return cfg?.instanceId || 
-    process.env.WEGIRL_INSTANCE_ID || 
-    process.env.OPENCLAW_INSTANCE_ID || 
+  const cfg = loadOpenClawConfig();
+  return cfg?.plugins?.entries?.wegirl?.config?.instanceId ||
     'instance-local';
 }
 
@@ -225,23 +242,13 @@ export async function wegirlSend(
     // 8. 本地：调用 V1 统一投递
     logger?.info?.(`[WeGirlSend] Local delivery to ${ctx.target} via V1`);
     
+    // 加载完整配置
+    const fullCfg = loadOpenClawConfig() || {};
+    
     // 构建 V1 参数
     const chatId = ctx.chatType === 'group' 
       ? (ctx.groupId || ctx.source)
       : ctx.source;
-    
-    const cfg = {
-      channels: {
-        wegirl: {
-          accountId: ctx.target,
-        }
-      },
-      models: {
-        mode: 'merge' as const,
-        provider: 'kimi-coding',
-        modelId: 'k2p5',
-      },
-    };
     
     const metadata: any = {
       originatingChannel: 'wegirl',
@@ -268,7 +275,7 @@ export async function wegirlSend(
       payload: options.payload,
       metadata,
       // V1 内部字段
-      cfg,
+      cfg: fullCfg,
       channel: 'wegirl',
       log: logger,
     });

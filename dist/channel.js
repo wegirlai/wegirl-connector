@@ -1,8 +1,28 @@
 // src/channel.ts - Channel Plugin 定义
 import Redis from 'ioredis';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
 const KEY_PREFIX = 'wegirl:';
+// 缓存 openclaw.json 配置
+let openclawConfig = null;
+/**
+ * 从 openclaw.json 加载配置
+ */
+function loadOpenClawConfig() {
+    if (openclawConfig)
+        return openclawConfig;
+    try {
+        const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+        const content = readFileSync(configPath, 'utf-8');
+        openclawConfig = JSON.parse(content);
+        return openclawConfig;
+    }
+    catch (err) {
+        return null;
+    }
+}
 export const wegirlPlugin = {
     plugin: {
         id: "wegirl",
@@ -29,7 +49,8 @@ export const wegirlPlugin = {
             resolveAccount: (cfg, id) => {
                 const accountId = id || 'default';
                 // 统一从 openclaw.json 的 plugins.wegirl.config 读取
-                const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
+                const fullCfg = loadOpenClawConfig() || {};
+                const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
                 return {
                     accountId,
                     redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
@@ -58,11 +79,19 @@ export const wegirlPlugin = {
                     return { ok: false, error: 'Redis publisher not connected' };
                 }
                 try {
+                    // 使用标准 V2 格式
                     await pub.publish('wegirl:replies', JSON.stringify({
-                        id: `wegirl-${Date.now()}`,
-                        type: 'message',
-                        content: text,
-                        to, from: from || 'agent', sessionId, accountId,
+                        flowType: 'A2H',
+                        source: accountId || from || 'agent',
+                        target: to,
+                        message: text,
+                        chatType: 'direct',
+                        routingId: `wegirl-${Date.now()}`,
+                        msgType: 'message',
+                        metadata: {
+                            sessionId,
+                            originalFrom: from,
+                        },
                         timestamp: Date.now(),
                     }));
                     return { ok: true };
@@ -74,14 +103,14 @@ export const wegirlPlugin = {
         },
         gateway: {
             startAccount: async (ctx) => {
-                const { cfg, accountId, account, abortSignal, log, setStatus } = ctx;
+                const { accountId, abortSignal, log, setStatus } = ctx;
                 const id = accountId || 'default';
-                const instanceId = cfg?.plugins?.entries?.wegirl?.config?.instanceId
-                    || process.env.OPENCLAW_INSTANCE_ID
-                    || 'instance-local';
+                // 直接读取 openclaw.json 配置
+                const fullCfg = loadOpenClawConfig() || {};
+                const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
+                const instanceId = pluginCfg?.instanceId || 'instance-local';
                 log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
                 // 统一从 openclaw.json 的 plugins.wegirl.config 读取 Redis 配置
-                const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
                 const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
                 const password = pluginCfg?.redisPassword;
                 const db = pluginCfg?.redisDb ?? 1;
@@ -160,6 +189,8 @@ export const wegirlPlugin = {
                         // 直接调用 V1 核心层 wegirlSessionsSend，跳过 V2 转换
                         // 参数名与 wegirl_send 标准保持一致
                         try {
+                            // 获取配置
+                            const msgCfg = loadOpenClawConfig() || {};
                             await wegirlSessionsSend({
                                 message,
                                 source, // V2 source
@@ -174,7 +205,7 @@ export const wegirlPlugin = {
                                 payload: data.payload,
                                 metadata: data.metadata,
                                 // V1 内部字段
-                                cfg,
+                                cfg: msgCfg,
                                 channel: 'wegirl',
                                 log,
                             });

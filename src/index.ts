@@ -1,5 +1,7 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
@@ -18,6 +20,24 @@ import type {
   ServiceConfig,
 } from './types.js';
 
+// 缓存 openclaw.json 配置
+let openclawConfig: any = null;
+
+/**
+ * 从 openclaw.json 加载配置
+ */
+function loadOpenClawConfig(): any {
+  if (openclawConfig) return openclawConfig;
+  try {
+    const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+    const content = readFileSync(configPath, 'utf-8');
+    openclawConfig = JSON.parse(content);
+    return openclawConfig;
+  } catch (err: any) {
+    return null;
+  }
+}
+
 // 模块实例
 let redisClient: Redis | null = null;
 let redisConnectPromise: Promise<void> | null = null;
@@ -33,14 +53,17 @@ const plugin = {
 
   register(context: PluginContext): void {
     const logger = context.logger;
-    const pluginConfig = context.pluginConfig;
+    
+    // 直接读取 openclaw.json 配置
+    const fullConfig = loadOpenClawConfig();
+    const pluginConfig = fullConfig?.plugins?.entries?.wegirl?.config || {};
 
-    // 实例ID（从配置、环境变量或默认值）
-    const INSTANCE_ID = pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+    // 实例ID（从配置读取）
+    const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
 
     logger.info(`[WeGirl] Plugin registering... (Instance: ${INSTANCE_ID})`);
 
-    // 保存 PluginRuntime 和 PluginConfig
+    // 保存 PluginRuntime
     if (context.runtime) {
       setWeGirlRuntime(context.runtime);
       logger.info('[WeGirl] Runtime saved to global');
@@ -48,11 +71,10 @@ const plugin = {
       logger.error('[WeGirl] No runtime in context!');
     }
     
-    if (pluginConfig) {
-      setWeGirlConfig(pluginConfig);
-      logger.info('[WeGirl] PluginConfig saved to global');
-      logger.info(`[WeGirl] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
-    }
+    // 保存 PluginConfig（用于兼容性）
+    setWeGirlConfig(pluginConfig);
+    logger.info('[WeGirl] PluginConfig saved to global');
+    logger.info(`[WeGirl] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
 
     // 初始化 Redis 连接
     async function initRedis(): Promise<void> {
@@ -128,7 +150,7 @@ const plugin = {
         // 初始化队列和路由器
         if (redisClient) {
           pendingQueue = new PendingQueue(redisClient);
-          messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger);
+          messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger, url, password);
           wegirlTools = new WeGirlTools(redisClient, INSTANCE_ID, logger);
 
           // 启动跨实例消息监听
@@ -251,13 +273,13 @@ const plugin = {
       // HR Manage Tool - 仅限 HR Agent 使用
       context.registerTool({
         name: 'hr_manage',
-        description: 'HR Agent 专用：创建和管理 OpenClaw Agents，同步 agents 到 Redis，以及处理飞书消息。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis；4) 处理飞书消息使用 process_message。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
+        description: 'HR Agent 专用：创建和管理 OpenClaw Agents，同步 agents 到 Redis，以及处理新成员入职。使用场景：1) 创建新 agent 时使用 create_agent；2) 查看所有 agents 使用 list_agents；3) 同步本地 agents 到 Redis 使用 sync_agents_to_redis；4) 处理新员工入职使用 create_staff。agent名称只能是英文字母、数字、横线(-)和下划线(_)。',
         parameters: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-              enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis', 'send_command', 'process_message'],
+              enum: ['create_agent', 'list_agents', 'get_agent', 'delete_agent', 'sync_agents_to_redis', 'send_command', 'create_staff'],
               description: '操作类型'
             },
             agentName: {
@@ -294,7 +316,7 @@ const plugin = {
             },
             message: {
               type: 'object',
-              description: '飞书消息数据（process_message 时使用）'
+              description: '入职请求消息（create_staff 时使用）'
             }
           },
           required: ['action']
@@ -306,7 +328,7 @@ const plugin = {
           if (!redisClient) throw new Error('Redis not initialized');
 
           const { action } = params;
-          const INSTANCE_ID = pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+          const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
 
           let result: any;
           switch (action) {
@@ -373,7 +395,7 @@ const plugin = {
               );
               break;
             }
-            case 'process_message': {
+            case 'create_staff': {
               const { message } = params;
               if (!message) {
                 throw new Error('缺少必填参数: message');
@@ -448,7 +470,7 @@ const plugin = {
             }
 
             const KEY_PREFIX = 'wegirl:';
-            const instanceId = pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+            const instanceId = pluginConfig?.instanceId || 'instance-local';
             const streamKey = `${KEY_PREFIX}stream:instance:${instanceId}`;
             const consumerGroup = 'wegirl-consumers';
 
@@ -601,7 +623,7 @@ const plugin = {
             res.status(200).json({
               status: 'healthy',
               redis: 'connected',
-              instanceId: pluginConfig?.instanceId || process.env.OPENCLAW_INSTANCE_ID || 'instance-local',
+              instanceId: pluginConfig?.instanceId || 'instance-local',
               timestamp: Date.now()
             });
           } catch (err: any) {
@@ -776,7 +798,7 @@ function getInstanceIdFromConfig(logger?: any): string {
     return instanceId;
   } catch (err: any) {
     logger?.error?.(`[hr_manage] Failed to read instanceId from config: ${err.message}`);
-    return process.env.OPENCLAW_INSTANCE_ID || 'instance-local';
+    return 'instance-local';
   }
 }
 
@@ -1000,15 +1022,25 @@ async function handleSendCommand(
   
   logger.info(`[hr_manage:send_command] Sending command: ${command}`);
   
-  // 构建消息
+  // 构建消息 - 使用标准 V2 格式
+  const routingId = randomUUID();
   const message = {
-    type: 'hr_command',
-    command: command,
-    payload: payload,
-    fromAgent: 'hr',
-    instanceId: instanceId,
+    flowType: 'A2A' as const,
+    source: 'hr',
+    target: payload?.agentId || 'default',
+    message: command,
+    chatType: 'direct' as const,
+    routingId,
+    msgType: 'hr_command',
+    payload: {
+      ...payload,
+      fromAgent: 'hr',
+      instanceId,
+    },
+    metadata: {
+      originalCommand: command,
+    },
     timestamp: Date.now(),
-    routingId: randomUUID(),
   };
   
   try {

@@ -178,33 +178,31 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const messageId = originalMessageId || `wegirl-${Date.now()}`;
     const createdAt = Date.now();
 
-    // 2. 发送 Redis 消息（包含 sessionKey 和 agentId，用于监控）
+    // 2. 发送 Redis 消息（使用标准 V2 格式）
     try {
       const redis = await getRedisPublisher(cfg);
       const forwardMsg = {
-        type: 'forward',
-        routingId,
-        messageId,
+        // 标准 V2 字段
+        flowType: 'H2A',
+        source: from,
+        target: accountId,
         message,
-        channel,
-        accountId,
-        from,
-        chatId,
         chatType,
-        agentId,
-        sessionKey,
-        status: 'pending',
-        source: 'wegirl-connector',
-        priority: 'normal',
-        createdAt,
-        expiresAt: createdAt + 3600000, // 1小时后过期
+        groupId: chatType === 'group' ? chatId : undefined,
+        routingId,
+        msgType: 'message',
+        // 元数据
         metadata: {
-          ...originalMetadata, // 保留原始 metadata（包含 feishuOpenId 等）
+          ...originalMetadata,
           matchedBy: route.matchedBy,
           originalChannel: channel,
+          agentId,
+          sessionKey,
+          messageId,
+          status: 'pending',
+          createdAt,
+          expiresAt: createdAt + 3600000,
         },
-        workflowId: undefined, // 预留：用于工作流编排
-        error: undefined, // 预留：处理失败时填充
         timestamp: Date.now()
       };
       await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
@@ -290,27 +288,35 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               replyStatus = 'completed';  // 正常完成
             }
 
-            // 直接发送当前 agent 的回复（不聚合）
-            const replyId = `wegirl-reply-${Date.now()}`;
+            // 直接发送当前 agent 的回复（不聚合）- 使用标准 V2 格式
             const replyMessage = {
-              id: replyId,
-              type: 'message',
-              routingId: routingId,
-              inReplyTo: messageId,
-              content: text,
-              to: chatId,
-              from: 'agent',
-              agentId: accountId, // 发送者
-              sessionId: sessionKey,
-              accountId: accountId, // 发送者
-              status: replyStatus,
-              isFinal: true,
-              replyType: 'text',
-              processedAt: Date.now(),
-              duration: Date.now() - createdAt,
-              taskId: taskId,
-              workflowId: undefined,
-              error: replyStatus === 'error' || replyStatus === 'timeout' ? text : undefined,
+              // 标准 V2 字段
+              flowType: 'A2H',
+              source: accountId,
+              target: chatId, // 群聊时为目标群
+              message: text,
+              chatType: 'group',
+              groupId: chatId,
+              routingId,
+              msgType: 'message',
+              // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
+              payload: {
+                feishuOpenId: originalMetadata?.feishuOpenId 
+                  || originalMetadata?.fromUserOpenId 
+                  || originalMetadata?.feishu_open_id
+                  || from,
+              },
+              // 元数据
+              metadata: {
+                inReplyTo: messageId,
+                replyStatus,
+                agentId: accountId,
+                sessionKey,
+                taskId,
+                isFinal: true,
+                processedAt: Date.now(),
+                duration: Date.now() - createdAt,
+              },
               timestamp: Date.now(),
             };
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
@@ -341,23 +347,32 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           }
           const replyId = `wegirl-reply-${Date.now()}`;
           const replyMessage = {
-            id: replyId,
-            type: 'message',
-            routingId: routingId, // 关联请求
-            inReplyTo: messageId, // 回复哪条消息
-            content: text,
-            to: chatId,
-            from: 'agent',
-            agentId: accountId, // 发送者（scout）
-            sessionId: sessionKey,
-            accountId: accountId, // 发送者（scout）
-            status: 'completed',
-            isFinal: true,
-            replyType: 'text',
-            processedAt: Date.now(),
-            duration: Date.now() - createdAt,
-            workflowId: undefined, // 预留：工作流编排
-            error: undefined, // 预留：错误信息
+            // 标准 V2 字段
+            flowType: 'A2H',
+            source: accountId,
+            target: chatId,
+            message: text,
+            chatType,
+            groupId: chatType === 'group' ? chatId : undefined,
+            routingId,
+            msgType: 'message',
+            // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
+            payload: {
+              feishuOpenId: originalMetadata?.feishuOpenId 
+                || originalMetadata?.fromUserOpenId 
+                || originalMetadata?.feishu_open_id
+                || from,
+            },
+            // 元数据
+            metadata: {
+              inReplyTo: messageId,
+              agentId: accountId,
+              sessionKey,
+              status: 'completed',
+              isFinal: true,
+              processedAt: Date.now(),
+              duration: Date.now() - createdAt,
+            },
             timestamp: Date.now(),
           };
           //log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
@@ -384,24 +399,27 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             const pub = await getRedisPublisher(cfg);
             if (pub) {
               const errorReply = {
-                id: `wegirl-reply-error-${Date.now()}`,
-                type: 'message',
-                routingId: routingId,
-                inReplyTo: messageId,
-                content: '',
-                to: chatId,
-                from: 'agent',
-                agentId: accountId, // 使用 accountId（如 scout-notifier）而非 agentId（如 scout）
-                sessionId: sessionKey,
-                accountId: accountId,
-                status: 'failed',
-                isFinal: true,
-                replyType: 'error',
-                processedAt: Date.now(),
-                duration: Date.now() - createdAt,
-                workflowId: undefined, // 预留：工作流编排
-                error: err.message,
-                errorCode: 'REPLY_PUBLISH_FAILED',
+                // 标准 V2 字段
+                flowType: 'A2H',
+                source: accountId,
+                target: chatId,
+                message: '',
+                chatType,
+                groupId: chatType === 'group' ? chatId : undefined,
+                routingId,
+                msgType: 'error',
+                // 元数据
+                metadata: {
+                  inReplyTo: messageId,
+                  agentId: accountId,
+                  sessionKey,
+                  status: 'failed',
+                  isFinal: true,
+                  processedAt: Date.now(),
+                  duration: Date.now() - createdAt,
+                  error: err.message,
+                  errorCode: 'REPLY_PUBLISH_FAILED',
+                },
                 timestamp: Date.now(),
               };
               await pub.publish('wegirl:replies', JSON.stringify(errorReply));

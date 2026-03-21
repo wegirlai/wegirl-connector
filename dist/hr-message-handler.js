@@ -1,6 +1,21 @@
 /**
  * HR Manage - 消息处理核心
  * 处理群聊 @ 消息 和 私聊入职绑定流程
+ *
+ * 消息格式遵循 wegirl_send V2 标准：
+ * {
+ *   flowType: 'H2A' | 'A2A' | 'A2H',
+ *   source: string,      // 发送者 StaffId
+ *   target: string,      // 接收者 StaffId
+ *   message: string,     // 消息内容
+ *   chatType: 'direct' | 'group',
+ *   groupId?: string,    // 群聊时必填
+ *   routingId?: string,
+ *   msgType?: 'message' | 'error' | 'onboard_human' | 'sync_agent',
+ *   payload?: object,    // 额外数据
+ *   metadata?: object,   // 元数据
+ *   timestamp: number
+ * }
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -50,6 +65,8 @@ export async function checkIsAgent(identifier, redis, logger) {
  * 检查是否是入职请求
  */
 export function isOnboardRequest(message) {
+    if (!message || typeof message !== 'string')
+        return false;
     const keywords = ['我要入职', '入职', '绑定', '注册', 'onboard', 'bind', 'register'];
     const lowerMsg = message.toLowerCase().trim();
     return keywords.some(kw => lowerMsg.includes(kw));
@@ -58,6 +75,8 @@ export function isOnboardRequest(message) {
  * 检查是否是入职数据格式
  */
 export function isOnboardFormat(message) {
+    if (!message || typeof message !== 'string')
+        return false;
     // 必须包含 工号 和 姓名
     const hasId = /工号\s*[:：]/.test(message);
     const hasName = /姓名\s*[:：]/.test(message);
@@ -134,35 +153,40 @@ export function parseOnboardData(message) {
 }
 /**
  * 生成入职提示文案（针对 Human）
+ * 人事主管风格：专业、热情、有条理
  */
 export function generateOnboardPrompt(userName) {
-    const greeting = userName ? `你好 ${userName}！` : '你好！';
-    return `${greeting}请填写入职登记表，我来帮你办理：
+    const greeting = userName ? `${userName}，你好！` : '你好！';
+    return `${greeting}欢迎加入微妞团队！我是团队的人事主管，负责协助新成员顺利入职。
+
+为了帮你快速办理入职手续，请按以下格式提供信息：
 
 ---
 
-**📝 入职登记表**
+**📝 入职信息登记表**
 
 | 项目 | 说明 |
 |------|------|
-| **工号** | 你的唯一标识（必填）<br>只能含：小写字母、数字、横线"、下划线"_" |
-| **姓名** | 你的真实姓名（必填） |
+| **工号** | 系统唯一标识（必填）<br>只能包含：小写字母、数字、横线"-"、下划线"_" |
+| **姓名** | 真实姓名（必填） |
 | **电话** | 联系方式（选填） |
-| **角色** | 你的职责/职位（选填，如：产品经理、设计师） |
-| **能力** | 擅长什么（选填，如：writing, analysis, sales） |
+| **角色** | 职位/职责（选填，如：产品经理、销售专员） |
+| **能力** | 技能标签（选填，如：writing, analysis, sales） |
 
 ---
 
-**示例：**
+**请直接回复：**
 \`\`\`
-工号：tiger
-姓名：张三
-电话：13800138000
-角色：产品经理
-能力：writing, analysis
+工号：
+姓名：
+电话：
+角色：
+能力：
 \`\`\`
 
-请回复你的信息，我马上录入系统！`;
+收到后我会立即处理，并协调 CTO 为你配置工作环境。
+
+如有任何问题，随时找我！`;
 }
 /**
  * 处理群聊 @ 消息
@@ -178,24 +202,25 @@ export async function handleMentionMessage(context, redis, logger, instanceId) {
     const isAgent = await checkIsAgent(identifier, redis, logger);
     if (isAgent) {
         logger.info(`[HR] @Agent detected: ${identifier}, sending sync_agent`);
-        const command = {
+        // 构建标准 V2 格式消息
+        const syncMsg = {
             flowType: 'A2A',
             source: 'hr',
             target: identifier,
             message: 'sync_agent',
             chatType: 'group',
             groupId: chatId,
-            msgType: 'sync_agent', // HR 命令类型
+            msgType: 'sync_agent',
+            routingId: randomUUID(),
             payload: {
                 agentId: identifier,
                 fromMention: true,
                 chatId,
                 chatType,
             },
-            routingId: randomUUID(),
             timestamp: Date.now(),
         };
-        await redis.publish('wegirl:replies', JSON.stringify(command));
+        await redis.publish('wegirl:replies', JSON.stringify(syncMsg));
         logger.info(`[HR] Sync agent command sent: ${identifier}`);
     }
     else {
@@ -215,14 +240,14 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
     // 1. 检查是否是入职请求（但没有数据）
     if (isOnboardRequest(message) && !isOnboardFormat(message)) {
         logger.info(`[HR] Onboard request without data from ${userId}`);
-        // 发送入职提示（标准 A2H 格式，msgType: message）
+        // 构建标准 V2 格式消息 (wegirl:replies 格式)
         const promptMsg = {
             flowType: 'A2H',
             source: 'hr',
-            target: feishuOpenId || userId, // 未绑定用户用 openId
+            target: feishuOpenId || userId,
             message: generateOnboardPrompt(userName),
             chatType: 'direct',
-            msgType: 'message', // 普通消息
+            msgType: 'message',
             routingId: randomUUID(),
             timestamp: Date.now(),
         };
@@ -235,14 +260,14 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         logger.info(`[HR] Onboard format detected from ${userId}`);
         const data = parseOnboardData(message);
         if (!data.valid) {
-            // 数据格式错误，发送错误提示（标准 A2H 格式）
+            // 数据格式错误，发送错误提示（标准 V2 格式）
             const errorMsg = {
                 flowType: 'A2H',
                 source: 'hr',
                 target: feishuOpenId || userId,
                 message: `❌ 信息格式错误：${data.error}\n\n请按以下格式重新发送：\n\`\`\`\n工号：xxx（只能包含小写字母、数字、-、_）\n姓名：xxx\n电话：xxx（选填）\n角色：xxx（选填）\n能力：xxx, xxx（选填）\n\`\`\``,
                 chatType: 'direct',
-                msgType: 'message',
+                msgType: 'error',
                 routingId: randomUUID(),
                 timestamp: Date.now(),
             };
@@ -251,28 +276,29 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         }
         // 检查 StaffID 是否被占用
         const existing = await redis.hgetall(`${KEY_PREFIX}staff:${data.staffId}`);
-        if (existing && existing.id) {
+        if (existing && existing.staffId) {
             const conflictMsg = {
                 flowType: 'A2H',
                 source: 'hr',
                 target: feishuOpenId || userId,
                 message: `❌ StaffID "${data.staffId}" 已被占用，请选择其他 ID`,
                 chatType: 'direct',
-                msgType: 'message',
+                msgType: 'error',
                 routingId: randomUUID(),
                 timestamp: Date.now(),
             };
             await redis.publish('wegirl:replies', JSON.stringify(conflictMsg));
             return;
         }
-        // 3. 发送入职数据到 wegirl-service（带 payload 的 HR 命令）
+        // 3. 发送入职数据到 wegirl-service（标准 V2 格式）
         const onboardMsg = {
-            flowType: 'A2H',
+            flowType: 'A2A',
             source: 'hr',
-            target: feishuOpenId || userId, // 回复给该用户
-            message: `✅ 入职申请已提交，正在处理...`, // 可选提示
+            target: 'default', // 发送给 CTO (default agent) 处理
+            message: `收到新员工入职申请：${data.name} (${data.staffId})`,
             chatType: 'direct',
-            msgType: 'onboard_human', // HR 命令类型
+            msgType: 'onboard_human',
+            routingId: randomUUID(),
             payload: {
                 staffId: data.staffId,
                 name: data.name,
@@ -280,8 +306,8 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
                 role: data.role,
                 capabilities: data.capabilities,
                 feishuOpenId: feishuOpenId || userId,
+                sourceUserId: userId,
             },
-            routingId: randomUUID(),
             timestamp: Date.now(),
         };
         await redis.publish('wegirl:replies', JSON.stringify(onboardMsg));

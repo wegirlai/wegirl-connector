@@ -8,6 +8,7 @@ OpenClaw Gateway 插件 - 微妞 AI 多 Agent 消息路由中枢
 - **Redis Stream 消费**: 消费 wegirl-service 发送的消息
 - **统一 StaffId 抽象**: 人类和 Agent 统一使用 StaffId 标识
 - **跨实例通信**: 支持多实例部署的消息路由
+- **HR 入职管理**: 自动化 Agent/人类入职流程
 
 ## 架构
 
@@ -44,10 +45,13 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 未绑定人类使用 openId 作为临时 staffId
 - ✅ `hr_manage` 工具处理入职登记
 - ✅ 自动生成入职登记表单
+- ✅ `create_staff` action 统一处理入职请求
+- ✅ 入职消息格式标准化（工号/姓名/电话/角色/能力）
 
 **Bug 修复**:
 - ✅ replyTo 解析支持字符串 open_id
 - ✅ 为所有 Agent 配置 anthropic auth profile
+- ✅ 修复 isOnboardRequest/isOnboardFormat 空值检查
 
 ---
 
