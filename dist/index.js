@@ -270,11 +270,11 @@ const plugin = {
                         },
                         source: {
                             type: 'string',
-                            description: '来源用户的 StaffId（如：hr, human:tiger, agent:scout）'
+                            description: '来源用户的 StaffId，必须从 session context.From 获取（消息发送者，如：human:tiger）'
                         },
                         target: {
                             type: 'string',
-                            description: '目标接收者的 StaffId，固定为 "hr"（表示人事专员处理）',
+                            description: '目标接收者的 StaffId，必须从 session context.AccountId 获取（消息接收者，如：hr）',
                             default: 'hr'
                         },
                         chatType: {
