@@ -232,7 +232,7 @@ export async function handleMentionMessage(context, redis, logger, instanceId) {
  * 返回消息对象，未处理返回 null
  */
 export async function handlePrivateMessage(context, redis, logger, instanceId) {
-    const { message, userId, agentId } = context;
+    const { message, userId } = context;
     if (!userId) {
         logger.warn('[HR] Empty userId in private message');
         return null;
@@ -244,7 +244,7 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         // 返回入职登记表
         return {
             flowType: 'A2H',
-            source: agentId || 'hr',
+            source: 'hr',
             target: userId,
             message: generateOnboardPrompt(""),
             chatType: 'direct',
@@ -264,7 +264,7 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
             // 返回错误消息
             return {
                 flowType: 'A2H',
-                source: agentId || 'hr',
+                source: 'hr',
                 target: userId,
                 message: `❌ 信息格式错误：${data.error}\n\n请按以下格式重新发送：\n\`\`\`\n工号：xxx（只能包含小写字母、数字、-、_）\n姓名：xxx\n电话：xxx（选填）\n角色：xxx（选填）\n能力：xxx, xxx（选填）\n\`\`\``,
                 chatType: 'direct',
@@ -280,7 +280,7 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
             // 返回冲突错误消息
             return {
                 flowType: 'A2H',
-                source: agentId || 'hr',
+                source: 'hr',
                 target: userId,
                 message: `❌ StaffID "${data.staffId}" 已被占用，请选择其他 ID`,
                 chatType: 'direct',
@@ -293,7 +293,7 @@ export async function handlePrivateMessage(context, redis, logger, instanceId) {
         // 3. 发送入职数据（标准 V2 格式）
         return {
             flowType: 'A2S',
-            source: agentId || 'hr',
+            source: 'hr',
             target: userId,
             message: `收到新员工入职申请：${data.name} (${data.staffId})`,
             chatType: 'direct',
