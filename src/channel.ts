@@ -2,7 +2,7 @@
 
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
-import { wegirlSessionsSend } from './sessions-send.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 import { wegirlSend } from './core/index.js';
 
 const KEY_PREFIX = 'wegirl:';

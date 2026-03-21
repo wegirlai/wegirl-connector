@@ -1,6 +1,6 @@
 // src/tools.ts - wegirl_send 工具实现
 import { randomUUID } from 'crypto';
-import { wegirlSessionsSend } from './sessions-send.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 const KEY_PREFIX = 'wegirl:';

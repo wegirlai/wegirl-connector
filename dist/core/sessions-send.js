@@ -1,6 +1,6 @@
-// src/sessions-send.ts - 发送消息到 Agent
+// src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 import Redis from 'ioredis';
-import { getWeGirlRuntime } from "./runtime.js";
+import { getWeGirlRuntime } from "../runtime.js";
 // Redis 连接缓存
 let redisClient = null;
 let redisConnectPromise = null;

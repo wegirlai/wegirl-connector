@@ -1,7 +1,7 @@
-// src/sessions-send.ts - 发送消息到 Agent
+// src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 
 import Redis from 'ioredis';
-import { getWeGirlRuntime } from "./runtime.js";
+import { getWeGirlRuntime } from "../runtime.js";
 
 type ReplyPayload = {
   text?: string;
@@ -80,7 +80,17 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId, routingId: originalRoutingId, messageId: originalMessageId, metadata: originalMetadata } = options;
+  const { message, cfg: originalCfg, channel, accountId, from, chatId, chatType, log, taskId, agentCount, currentAgentId, routingId: originalRoutingId, messageId: originalMessageId, metadata: originalMetadata } = options;
+
+  // 添加模型配置到 cfg
+  const cfg = {
+    ...originalCfg,
+    models: {
+      mode: 'merge' as const,
+      provider: 'kimi-coding',
+      modelId: 'k2p5',
+    },
+  };
 
   log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, accountId=${accountId}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
 
@@ -382,7 +392,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // 合并 replyOptions，添加模型设置
     const replyOptions = {
       ...baseReplyOptions,
-      model: 'kimi-coding/k2p5',
+      Model: 'kimi-coding/k2p5',
     };
 
     // 调用 dispatchReplyFromConfig 发送消息给 Agent

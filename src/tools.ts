@@ -2,7 +2,7 @@
 
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { wegirlSessionsSend } from './sessions-send.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 import { getWeGirlRuntime } from './runtime.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
