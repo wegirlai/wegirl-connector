@@ -293,16 +293,16 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               // 标准 V2 字段
               flowType: 'A2H',
               source: target,
-              target: chatId, // 群聊时为目标群
+              target: source, // 群聊时为目标群
               message: text,
               chatType: 'group',
-              groupId: chatId,
+              groupId: groupId,
               routingId,
               msgType: 'message',
               // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
               payload: {
-                feishuOpenId: originalMetadata?.feishuOpenId 
-                  || originalMetadata?.fromUserOpenId 
+                feishuOpenId: originalMetadata?.feishuOpenId
+                  || originalMetadata?.fromUserOpenId
                   || originalMetadata?.feishu_open_id
                   || source,
               },
