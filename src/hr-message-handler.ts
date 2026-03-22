@@ -124,7 +124,8 @@ export interface OnboardData {
 }
 
 export function parseOnboardData(message: string): OnboardData {
-  const lines = message.split('\n').map(l => l.trim()).filter(l => l);
+  // 将多行合并为单行，方便统一处理
+  const fullText = message.replace(/\n/g, ' ').trim();
 
   let staffId: string | undefined;
   let name: string | undefined;
@@ -132,45 +133,39 @@ export function parseOnboardData(message: string): OnboardData {
   let role: string | undefined;
   let capabilities: string[] | undefined;
 
-  for (const line of lines) {
-    // 匹配 工号（支持 : 或 ：）- 只匹配工号部分（遇到空格或下一个关键字停止）
-    const idMatch = line.match(/工号\s*[:：]\s*([a-z0-9_-]+)/i);
-    if (idMatch && !staffId) {
-      staffId = idMatch[1].trim();
-      continue;
-    }
+  // 按顺序解析各个字段
+  // 1. 工号 - 匹配工号：xxx 或 工号: xxx（只匹配合法的工号字符）
+  const idMatch = fullText.match(/工号\s*[:：]\s*([a-z0-9_-]+)/i);
+  if (idMatch) {
+    staffId = idMatch[1].trim();
+  }
 
-    // 匹配姓名（支持 : 或 ：）- 匹配到下一个关键字或行尾
-    const nameMatch = line.match(/姓名\s*[:：]\s*([^电话角色能力]+)/);
-    if (nameMatch && !name) {
-      name = nameMatch[1].trim();
-      continue;
-    }
+  // 2. 姓名 - 匹配姓名：xxx 或 姓名: xxx（匹配到下一个关键字之前的内容）
+  // 使用正向肯定查看来匹配到"电话"、"角色"或"能力"之前
+  const nameMatch = fullText.match(/姓名\s*[:：]\s*([^\s]+?)(?=\s*(?:电话|手机|角色|职责|能力|$))/);
+  if (nameMatch) {
+    name = nameMatch[1].trim();
+  }
 
-    // 匹配电话/手机（支持 : 或 ：）- 匹配数字
-    const phoneMatch = line.match(/(?:电话|手机|联系方式)\s*[:：]\s*(\d+)/);
-    if (phoneMatch && !phone) {
-      phone = phoneMatch[1].trim();
-      continue;
-    }
+  // 3. 电话/手机 - 匹配数字
+  const phoneMatch = fullText.match(/(?:电话|手机|联系方式)\s*[:：]\s*(\d+)/);
+  if (phoneMatch) {
+    phone = phoneMatch[1].trim();
+  }
 
-    // 匹配角色/职责（支持 : 或 ：）- 匹配到下一个关键字或行尾
-    const roleMatch = line.match(/(?:角色|职责)\s*[:：]\s*([^能力]+)/);
-    if (roleMatch && !role) {
-      role = roleMatch[1].trim();
-      continue;
-    }
+  // 4. 角色/职责 - 匹配到"能力"之前
+  const roleMatch = fullText.match(/(?:角色|职责)\s*[:：]\s*([^\s]+?)(?=\s*能力|$)/);
+  if (roleMatch) {
+    role = roleMatch[1].trim();
+  }
 
-    // 匹配能力（支持 : 或 ：）- 匹配到行尾
-    const capMatch = line.match(/能力\s*[:：]\s*(.+)/);
-    if (capMatch) {
-      // 解析逗号分隔的能力标签
-      capabilities = capMatch[1]
-        .split(/[,，]/)
-        .map(c => c.trim())
-        .filter(c => c.length > 0);
-      continue;
-    }
+  // 5. 能力 - 匹配到行尾，逗号分隔
+  const capMatch = fullText.match(/能力\s*[:：]\s*(.+?)(?=\s*(?:$))/);
+  if (capMatch) {
+    capabilities = capMatch[1]
+      .split(/[,，]/)
+      .map(c => c.trim())
+      .filter(c => c.length > 0);
   }
 
   // 验证
@@ -310,8 +305,11 @@ export async function handlePrivateMessage(
 
   logger.info(`[HR] Private message from ${userId}: ${message?.substring(0, 50)}`);
 
+  // 预计算 isOnboardFormat 结果，避免重复调用
+  const hasOnboardFormat = isOnboardFormat(message);
+
   // 1. 检查是否是入职请求（但没有数据）
-  if (isOnboardRequest(message) && !isOnboardFormat(message)) {
+  if (isOnboardRequest(message) && !hasOnboardFormat) {
     logger.info(`[HR] Onboard request without data from ${userId}`);
 
     // 返回入职登记表
@@ -329,9 +327,9 @@ export async function handlePrivateMessage(
 
   // 2. 检查是否是入职数据格式
   console.log(`[HR] Checking onboard format for: ${message?.substring(0, 50)}`);
-  console.log(`[HR] isOnboardFormat result: ${isOnboardFormat(message)}`);
+  console.log(`[HR] isOnboardFormat result: ${hasOnboardFormat}`);
 
-  if (isOnboardFormat(message)) {
+  if (hasOnboardFormat) {
     logger.info(`[HR] Onboard format detected from ${userId}`);
 
     const data = parseOnboardData(message);

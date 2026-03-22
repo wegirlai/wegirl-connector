@@ -30,7 +30,7 @@ export const wegirlPlugin = {
             label: '微妞AI',
             selectionLabel: '微妞AI',
             docsPath: '/channels/wegirl',
-            blurb: '微妞AI机器人，可连接飞书。',
+            blurb: '微妞AI机器人，Agent 协作中枢。',
         },
         capabilities: {
             chatTypes: ['direct'],
@@ -196,7 +196,7 @@ export const wegirlPlugin = {
                                 source, // V2 source
                                 target, // V2 target
                                 chatType: chatType === 'group' ? 'group' : 'direct',
-                                groupId: data.chatId || data.metadata?.feishuChatId,
+                                groupId: data.groupId || data.chatId,
                                 routingId: routingId || `wegirl-${Date.now()}`,
                                 taskId: data.taskId,
                                 stepId: data.stepId,

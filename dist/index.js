@@ -266,11 +266,11 @@ const plugin = {
                         },
                         source: {
                             type: 'string',
-                            description: '来源用户的 StaffId（工号），必须从 session context.From 获取（消息发送者，如：tiger）'
+                            description: '来源用户的 StaffId（工号），从 session context 的 From 字段获取（格式：feishu:oc_xxx 或 wegirl:xxx，提取 xxx 部分作为 StaffId）'
                         },
                         target: {
                             type: 'string',
-                            description: '目标接收者的 StaffId（工号），必须从 session context.AccountId 获取（消息接收者，如：hr）',
+                            description: '目标接收者的 StaffId（工号），固定为 "hr"（消息接收者）',
                             default: 'hr'
                         },
                         chatType: {
@@ -299,6 +299,7 @@ const plugin = {
                             const { message, chatType, source, target, senderName, groupId, routingId } = params;
                             console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, groupId, routingId }));
                             // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
+                            // source 保持原样传入，包含 "source:" 或 "source：" 前缀
                             const normalizedMessage = {
                                 chatType: chatType || 'direct',
                                 source: source,
@@ -883,7 +884,7 @@ async function handleSendCommand(args, redis, logger, instanceId) {
     }
 }
 /**
- * 处理飞书消息
+ * 处理入职消息
  * 根据消息类型（私聊/群聊@）判断并发送相应命令
  */
 async function handleProcessMessage(message, redis, logger, instanceId) {
