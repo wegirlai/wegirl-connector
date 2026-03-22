@@ -22,7 +22,19 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.0.39 (2026-03-21) ⭐ Current
+### v2.1.0 (2026-03-22) ⭐ Current
+
+**hr_manage 工具增强**:
+- ✅ `from` 参数重命名为 `source`，保持一致性
+- ✅ 保留 `source:` 前缀传递（支持中英文冒号）
+- ✅ 入职解析支持单行格式
+- ✅ `isOnboardFormat` 结果缓存优化
+
+详见 [MILESTONE-v2.1.0.md](./MILESTONE-v2.1.0.md)
+
+---
+
+### v2.0.39 (2026-03-21)
 
 **与 wegirl-service 集成**:
 - ✅ 职责分离：wegirl-connector 只发送，`wegirl-service` 处理业务逻辑
