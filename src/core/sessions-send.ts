@@ -115,7 +115,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     },
   };
 
-  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
+  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
 
   // 获取 PluginRuntime
   const runtime = getWeGirlRuntime();
@@ -341,19 +341,12 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             // 标准 V2 字段
             flowType: 'A2H',
             source: target,
-            target: chatId,
+            target: source,
             message: text,
             chatType,
             groupId: chatType === 'group' ? chatId : undefined,
             routingId,
             msgType: 'message',
-            // 关键：传入 feishuOpenId 用于新用户入职（多种备选来源）
-            payload: {
-              feishuOpenId: originalMetadata?.feishuOpenId
-                || originalMetadata?.fromUserOpenId
-                || originalMetadata?.feishu_open_id
-                || source,
-            },
             // 元数据
             metadata: {
               inReplyTo: messageId,
