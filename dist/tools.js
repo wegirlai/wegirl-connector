@@ -421,6 +421,7 @@ export class WeGirlTools {
     async queryStaff(by, query) {
         const results = [];
         const normalizedQuery = this.normalizeStaffId(query) || query;
+        this.logger?.info?.(`[WeGirl Tools] queryStaff called: by=${by}, query=${query}, normalized=${normalizedQuery}`);
         switch (by) {
             case 'id': {
                 // 精确匹配 staffId
@@ -453,6 +454,10 @@ export class WeGirlTools {
                 }
                 break;
             }
+        }
+        this.logger?.info?.(`[WeGirl Tools] queryStaff result: found ${results.length} staff(s)`);
+        if (results.length > 0) {
+            this.logger?.info?.(`[WeGirl Tools] queryStaff results:`, results.map(r => ({ id: r.id, name: r.name, type: r.type, status: r.status })));
         }
         return results;
     }
