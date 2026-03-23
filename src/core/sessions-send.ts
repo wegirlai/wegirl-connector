@@ -274,6 +274,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       body: message,
     });
 
+    // 确保 cfg 包含必要的账户信息
+    const fullCfg = {
+      ...cfg,
+      // 确保 accounts 存在
+      accounts: cfg?.accounts || {},
+    };
+
     // 构建 inbound context
     // Provider/Surface: wegirl（当前渠道）
     // OriginatingChannel/OriginatingTo: 目标渠道，Gateway 会自动路由回复到该渠道
@@ -311,7 +318,14 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
       deliver: async (payload: ReplyPayload, info: { kind: ReplyDispatchKind }) => {
         const text = payload.text ?? '';
-        log?.info?.(`>=====[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
+        
+        // 记录详细的回复信息，包括错误
+        if (payload.isError) {
+          log?.error?.(`>=====[WeGirl SessionsSend] agent ERROR reply: ${JSON.stringify(payload)}`);
+          log?.error?.(`>=====[WeGirl SessionsSend] error info.kind=${info?.kind}, sessionKey=${sessionKey}`);
+        } else {
+          log?.info?.(`>=====[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
+        }
 
         // 只处理最终回复
         if (info?.kind !== 'final' || !text.trim()) {
@@ -476,7 +490,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // 调用 dispatchReplyFromConfig 发送消息给 Agent
     const result = await runtime.channel.reply.dispatchReplyFromConfig({
       ctx: inboundCtx,
-      cfg,
+      cfg: fullCfg,
       dispatcher,
       replyOptions,
     });
