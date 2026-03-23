@@ -257,13 +257,26 @@ const plugin = {
                 },
                 execute: async (_toolCallId, params) => {
                     logger.info(`[wegirl_query] 调用: ${JSON.stringify(params)}`);
+                    logger.info(`[wegirl_query] redisClient status: ${redisClient ? (redisClient.status || 'unknown') : 'null'}`);
                     try {
                         const { by, query } = params;
+                        logger.info(`[wegirl_query] 参数解析: by=${by}, query=${query}`);
                         if (!redisClient) {
+                            logger.info(`[wegirl_query] redisClient 为空，尝试初始化...`);
                             await initRedis();
                         }
+                        if (!redisClient) {
+                            logger.error(`[wegirl_query] Redis 初始化失败`);
+                            return {
+                                success: false,
+                                error: 'Redis 连接失败'
+                            };
+                        }
+                        logger.info(`[wegirl_query] 创建 WeGirlTools 实例...`);
                         const tools = new WeGirlTools(redisClient, pluginConfig?.instanceId || 'instance-local', logger);
+                        logger.info(`[wegirl_query] 调用 queryStaff: by=${by}, query=${query}`);
                         const results = await tools.queryStaff(by, query);
+                        logger.info(`[wegirl_query] 查询结果: ${results.length} 条记录`);
                         return {
                             success: true,
                             count: results.length,
@@ -275,6 +288,7 @@ const plugin = {
                     }
                     catch (err) {
                         logger.error(`[wegirl_query] 失败:`, err.message);
+                        logger.error(`[wegirl_query] 错误堆栈:`, err.stack);
                         return {
                             success: false,
                             error: err.message
