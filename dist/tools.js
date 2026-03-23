@@ -462,23 +462,32 @@ export class WeGirlTools {
         return results;
     }
     formatStaffInfo(staffId, data) {
+        // 将 Buffer 转换为字符串
+        const getString = (val) => {
+            if (!val)
+                return undefined;
+            if (Buffer.isBuffer(val))
+                return val.toString('utf-8');
+            return String(val);
+        };
         let capabilities = [];
-        if (data.capabilities) {
+        const capVal = getString(data.capabilities);
+        if (capVal) {
             try {
-                capabilities = JSON.parse(data.capabilities);
+                capabilities = JSON.parse(capVal);
             }
             catch {
-                capabilities = String(data.capabilities).split(',').map((s) => s.trim()).filter(Boolean);
+                capabilities = capVal.split(',').map((s) => s.trim()).filter(Boolean);
             }
         }
         return {
             id: staffId,
-            type: data.type,
-            name: data.name,
-            instanceId: data.instanceId,
-            status: data.status,
+            type: getString(data.type),
+            name: getString(data.name),
+            instanceId: getString(data.instanceId),
+            status: getString(data.status),
             capabilities: capabilities,
-            lastHeartbeat: data.lastHeartbeat ? parseInt(data.lastHeartbeat) : undefined
+            lastHeartbeat: data.lastHeartbeat ? parseInt(getString(data.lastHeartbeat) || '0') : undefined
         };
     }
 }
