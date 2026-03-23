@@ -110,12 +110,35 @@ export async function wegirlSessionsSend(options) {
         const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
         const messageId = originalMessageId || `wegirl-${Date.now()}`;
         const createdAt = Date.now();
-        // 辅助函数：根据 source 和 target 判断 flowType
-        // 规则：
-        // - Human (source:ou_*/source:*) -> Agent: H2A
-        // - Agent -> Human (target:ou_*/human ID): A2H
-        // - Agent -> Agent: A2A
-        function determineFlowType(src, tgt) {
+        // 辅助函数：从 Redis 查询 staff 类型
+        async function getStaffType(redis, staffId) {
+            try {
+                // 去掉 source: 前缀
+                const cleanId = staffId.startsWith('source:') ? staffId.slice(7) : staffId;
+                const data = await redis.hgetall(`wegirl:staff:${cleanId}`);
+                return data.type || 'unknown';
+            }
+            catch (err) {
+                log?.warn?.(`[WeGirl SessionsSend] Failed to get staff type for ${staffId}:`, err);
+                return 'unknown';
+            }
+        }
+        // 辅助函数：根据 source 和 target 判断 flowType（从 Redis 查询）
+        async function determineFlowType(redis, src, tgt) {
+            const [sourceType, targetType] = await Promise.all([
+                getStaffType(redis, src),
+                getStaffType(redis, tgt)
+            ]);
+            log?.info?.(`[WeGirl SessionsSend] Staff types: source=${src}(${sourceType}), target=${tgt}(${targetType})`);
+            if (sourceType === 'human' && targetType === 'agent')
+                return 'H2A';
+            if (sourceType === 'agent' && targetType === 'human')
+                return 'A2H';
+            if (sourceType === 'agent' && targetType === 'agent')
+                return 'A2A';
+            if (sourceType === 'human' && targetType === 'human')
+                return 'H2H';
+            // 如果查询失败，使用启发式规则
             const isHumanSource = src.startsWith('source:') || src.startsWith('ou_');
             const isHumanTarget = tgt.startsWith('source:') || tgt.startsWith('ou_') || !tgt.includes(':');
             if (isHumanSource && !isHumanTarget)
@@ -124,15 +147,15 @@ export async function wegirlSessionsSend(options) {
                 return 'A2H';
             if (!isHumanSource && !isHumanTarget)
                 return 'A2A';
-            return 'H2A'; // 默认
+            return 'H2A';
         }
-        const flowType = determineFlowType(source, target);
-        log?.info?.(`[WeGirl SessionsSend] Flow type determined: ${flowType} (source=${source}, target=${target})`);
         // 定义 forwardMsg 在更高作用域，以便后续回调函数访问
         let forwardMsg;
         // 2. 发送 Redis 消息（使用标准 V2 格式）
         try {
             const redis = await getRedisPublisher(cfg);
+            const flowType = await determineFlowType(redis, source, target);
+            log?.info?.(`[WeGirl SessionsSend] Flow type determined: ${flowType} (source=${source}, target=${target})`);
             forwardMsg = {
                 // 标准 V2 字段
                 flowType: flowType,
@@ -143,6 +166,7 @@ export async function wegirlSessionsSend(options) {
                 groupId: chatType === 'group' ? chatId : undefined,
                 routingId,
                 msgType: 'message',
+                fromType: 'inner', // 标记为内部工具调用
                 // 元数据
                 metadata: {
                     ...originalMetadata,
@@ -236,8 +260,8 @@ export async function wegirlSessionsSend(options) {
                             replyStatus = 'completed'; // 正常完成
                         }
                         // 直接发送当前 agent 的回复（不聚合）- 使用标准 V2 格式
-                        // 使用 determineFlowType 判断流向（当前是 Agent -> Human，应为 A2H）
-                        const groupReplyFlowType = determineFlowType(target, source);
+                        // 从 Redis 查询 staff 类型判断流向
+                        const groupReplyFlowType = await determineFlowType(pub, target, source);
                         const replyMessage = {
                             // 标准 V2 字段
                             flowType: groupReplyFlowType,
@@ -248,6 +272,7 @@ export async function wegirlSessionsSend(options) {
                             groupId: groupId,
                             routingId,
                             msgType: 'message',
+                            fromType: 'inner', // 标记为内部工具调用
                             // 元数据
                             metadata: {
                                 replyStatus,
@@ -285,7 +310,7 @@ export async function wegirlSessionsSend(options) {
                     }
                     const replyId = `wegirl-reply-${Date.now()}`;
                     // 使用 determineFlowType 判断流向（当前是 Agent -> Human，应为 A2H）
-                    const replyFlowType = determineFlowType(target, source);
+                    const replyFlowType = await determineFlowType(pub, target, source);
                     const replyMessage = {
                         // 标准 V2 字段
                         flowType: replyFlowType,
@@ -296,6 +321,7 @@ export async function wegirlSessionsSend(options) {
                         groupId: chatType === 'group' ? chatId : undefined,
                         routingId,
                         msgType: 'message',
+                        fromType: 'inner', // 标记为内部工具调用
                         // 元数据
                         metadata: {
                             inReplyTo: messageId,

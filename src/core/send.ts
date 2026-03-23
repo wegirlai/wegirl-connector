@@ -281,6 +281,7 @@ export async function wegirlSend(
         chatType: ctx.chatType,
         groupId: ctx.groupId,
         msgType: options.msgType || 'message',
+        fromType: 'inner',  // 标记为内部工具调用
         payload: options.payload,
         taskId: ctx.taskId,
         stepId: ctx.stepId,

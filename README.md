@@ -22,9 +22,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.1 (2026-03-23) ⭐ Current
+### v2.1.2 (2026-03-23) ⭐ Current
 
-**Staff 查询与标准化**:
+**消息来源标记**:
+- ✅ `forwardMsg` 和 `replyMessage` 添加 `fromType: 'inner'` 字段
+- ✅ 便于下游服务区分消息来源和追踪流向
+
+详见 [MILESTONE-v2.1.2.md](./MILESTONE-v2.1.2.md)
+
+---
+
+### v2.1.1 (2026-03-22)
 - ✅ 新增 `wegirl_query` 工具 - 支持 id/name/capability 三种查询方式
 - ✅ StaffId 标准化规则 - 普通 ID 转小写，source: 前缀保留
 - ✅ `wegirl_send` 工具描述增强 - 强调先查询再发送

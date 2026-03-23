@@ -233,6 +233,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         groupId: chatType === 'group' ? chatId : undefined,
         routingId,
         msgType: 'message',
+        fromType: 'inner',  // 标记为内部工具调用
         // 元数据
         metadata: {
           ...originalMetadata,
@@ -343,6 +344,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               groupId: groupId,
               routingId,
               msgType: 'message',
+              fromType: 'inner',  // 标记为内部工具调用
               // 元数据
               metadata: {
                 replyStatus,
@@ -350,12 +352,6 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 taskId,
                 isFinal: true,
                 processedAt: Date.now(),
-                duration: Date.now() - createdAt,
-              },
-              timestamp: Date.now(),
-            };
-            await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);                processedAt: Date.now(),
                 duration: Date.now() - createdAt,
               },
               timestamp: Date.now(),
@@ -388,7 +384,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           }
           const replyId = `wegirl-reply-${Date.now()}`;
           // 使用 determineFlowType 判断流向（当前是 Agent -> Human，应为 A2H）
-          const replyFlowType = determineFlowType(target, source);
+          const replyFlowType = await determineFlowType(pub, target, source);
           const replyMessage = {
             // 标准 V2 字段
             flowType: replyFlowType,
@@ -399,6 +395,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             groupId: chatType === 'group' ? chatId : undefined,
             routingId,
             msgType: 'message',
+            fromType: 'inner',  // 标记为内部工具调用
             // 元数据
             metadata: {
               inReplyTo: messageId,
