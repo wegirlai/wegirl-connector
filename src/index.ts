@@ -278,7 +278,7 @@ const plugin = {
             },
             source: {
               type: 'string',
-              description: '来源 StaffId（必填）。普通 staffId 使用小写（如 "hr", "scout"）；未入职用户使用 source: 前缀（如 "source:ou_xxx"）'
+              description: '来源 StaffId（必填）。普通 staffId 使用小写（如 "hr", "scout"）；未入职用户使用 source: 前缀（如 "source:temp_xxx"）'
             },
             target: {
               type: 'string',
@@ -445,7 +445,7 @@ const plugin = {
             },
             source: {
               type: 'string',
-              description: '来源用户的 StaffId（工号），从 session context 的 From 字段获取（格式：feishu:oc_xxx 或 wegirl:xxx，提取 xxx 部分作为 StaffId）'
+              description: '来源用户的 StaffId（工号），从 session context 的 From 字段获取'
             },
             target: {
               type: 'string',

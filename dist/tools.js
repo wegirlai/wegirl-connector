@@ -424,7 +424,7 @@ export class WeGirlTools {
     /**
      * StaffId 标准化规则：
      * - 普通 ID 转小写： "HR" → "hr"
-     * - source: 前缀保留： "source:ou_xxx" → "source:ou_xxx"
+     * - source: 前缀保留：未注册用户的临时标识
      */
     normalizeStaffId(id) {
         if (!id)

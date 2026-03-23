@@ -10,12 +10,12 @@ const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
 /**
  * StaffId 标准化规则：
  * - 普通 ID 转小写： "HR" → "hr"
- * - source: 前缀保留： "source:ou_xxx" → "source:ou_xxx"
+ * - source: 前缀保留：未注册用户的临时标识
  */
 function normalizeStaffId(id) {
     if (!id)
         return id;
-    // 如果包含 source: 或 source：前缀，保持原样（后面是飞书 open_id）
+    // 如果包含 source: 或 source：前缀，保持原样（未注册用户临时标识）
     if (id.startsWith('source:') || id.startsWith('source：')) {
         return id;
     }

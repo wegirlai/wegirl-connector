@@ -394,7 +394,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
         // ========== 单 agent 回复（原有逻辑）==========
         // 只有 channel="wegirl" 或 originatingChannel="wegirl" 时才通过 outbound 发送
-        // 其他 channel（如 feishu）由 Gateway 自动路由，不处理
+        // 其他 channel 由 Gateway 自动路由，不处理
         const effectiveChannel = originalMetadata?.originatingChannel || channel;
         if (effectiveChannel !== 'wegirl') {
           log?.debug?.(`[WeGirl SessionsSend] effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
