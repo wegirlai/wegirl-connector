@@ -6,6 +6,7 @@ import { wegirlSessionsSend } from './core/sessions-send.js';
 import { getWeGirlRuntime } from './runtime.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { hasAccount, getAccount } from './index.js';
 
 const KEY_PREFIX = 'wegirl:';
 
@@ -120,6 +121,27 @@ export class WeGirlTools {
     const startTime = Date.now();
 
     this.logger.info(`[WeGirlTools] [${routingId}] Sending message to ${target}`);
+
+    // 检查 target 是否存在于 accounts cache 中
+    const targetStaffId = target.replace(/^agent:/, '').replace(/^human:/, '');
+    if (!hasAccount(targetStaffId)) {
+      this.logger.warn(`[WeGirlTools] [${routingId}] Target not found in accounts: ${target}`);
+      
+      // 尝试从 Redis 重新加载（可能是最新的）
+      const freshData = await this.redis.hgetall(`${KEY_PREFIX}staff:${targetStaffId}`);
+      if (!freshData || Object.keys(freshData).length === 0) {
+        return {
+          content: [{ type: "text" as const, text: `目标 "${target}" 不存在。请确认 staffId 是否正确，或使用 wegirl_query 查询可用列表。` }],
+          details: {
+            success: false,
+            error: `Target not found: ${target}`,
+            routingId
+          }
+        };
+      }
+      // 如果 Redis 中有，继续发送
+      this.logger.info(`[WeGirlTools] [${routingId}] Target found in Redis (not in cache), proceeding...`);
+    }
 
     // 发布转交开始事件
     await this.publishRoutingEvent(routingId, 'started', {

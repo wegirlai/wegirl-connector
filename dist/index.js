@@ -13,6 +13,7 @@ import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler
 import { wegirlSend } from './core/index.js'; // 新核心模块
 // 缓存 openclaw.json 配置
 let openclawConfig = null;
+let accountsCache = new Map();
 /**
  * 从 openclaw.json 加载配置
  */
@@ -28,6 +29,73 @@ function loadOpenClawConfig() {
     catch (err) {
         return null;
     }
+}
+/**
+ * 从 Redis 加载所有 agents 和 humans 到 accounts
+ */
+async function loadAccountsFromRedis(redis, logger) {
+    const KEY_PREFIX = 'wegirl:';
+    const accounts = new Map();
+    try {
+        // 获取所有 staff keys
+        const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
+        logger?.info?.(`[WeGirl] Loading accounts from Redis: found ${keys.length} staff keys`);
+        for (const key of keys) {
+            const staffId = key.toString().replace(`${KEY_PREFIX}staff:`, '');
+            // 跳过特殊 keys
+            if (staffId.includes(':') && !staffId.startsWith('source:'))
+                continue;
+            const data = await redis.hgetall(key);
+            if (!data || Object.keys(data).length === 0)
+                continue;
+            // 将 Buffer 转换为字符串
+            const getString = (val) => {
+                if (!val)
+                    return undefined;
+                if (Buffer.isBuffer(val))
+                    return val.toString('utf-8');
+                return String(val);
+            };
+            const type = getString(data.type);
+            const name = getString(data.name);
+            const status = getString(data.status);
+            // 只添加 online 状态的 agent 和 valid 的 human
+            if (type === 'agent' && status === 'online') {
+                accounts.set(staffId, {
+                    id: staffId,
+                    name: name || staffId,
+                    type: 'agent',
+                    status: 'online',
+                    capabilities: getString(data.capabilities)?.split(',') || []
+                });
+            }
+            else if (type === 'human' || staffId.startsWith('source:')) {
+                accounts.set(staffId, {
+                    id: staffId,
+                    name: name || staffId,
+                    type: 'human',
+                    status: status || 'active'
+                });
+            }
+        }
+        logger?.info?.(`[WeGirl] Loaded ${accounts.size} accounts into cache`);
+    }
+    catch (err) {
+        logger?.error?.(`[WeGirl] Failed to load accounts from Redis:`, err.message);
+    }
+    return accounts;
+}
+/**
+ * 获取 account 信息
+ */
+function getAccount(staffId) {
+    return accountsCache.get(staffId);
+}
+/**
+ * 检查 account 是否存在
+ */
+function hasAccount(staffId) {
+    return accountsCache.has(staffId);
 }
 // 模块实例
 let redisClient = null;
@@ -102,6 +170,8 @@ const plugin = {
                     // 超时处理
                     setTimeout(() => reject(new Error('Redis connect timeout')), 10000);
                 });
+                // 加载所有 agents 和 humans 到 accounts cache
+                accountsCache = await loadAccountsFromRedis(redisClient, logger);
                 // 注册 Agent 心跳（如果配置了 agentId）
                 const agentId = config.agentId;
                 if (agentId && redisClient) {
@@ -1013,4 +1083,6 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
     };
 }
 export default plugin;
+// 导出 accounts 相关函数供其他模块使用
+export { getAccount, hasAccount, accountsCache };
 //# sourceMappingURL=index.js.map
