@@ -245,7 +245,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         groupId: chatType === 'group' ? chatId : undefined,
         routingId,
         msgType: 'message',
-        fromType: 'inner',  // 标记为内部工具调用
+        fromType: options.fromType || 'inner',  // 从参数获取，默认为 'inner'
         // 元数据
         metadata: {
           ...originalMetadata,
