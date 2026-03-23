@@ -214,13 +214,25 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       return 'H2A';
     }
 
-    // 定义 forwardMsg 在更高作用域，以便后续回调函数访问
+    // 辅助函数：对调 flowType（H2A <-> A2H，A2A 保持）
+    function reverseFlowType(flowType: string): string {
+      const map: Record<string, string> = {
+        'H2A': 'A2H',
+        'A2H': 'H2A',
+        'A2A': 'A2A',
+        'H2H': 'H2H'
+      };
+      return map[flowType] || flowType;
+    }
+
+    // 定义 forwardMsg 和 flowType 在更高作用域，以便后续回调函数访问
     let forwardMsg: any;
+    let flowType: string = 'H2A'; // 默认值，后续会被覆盖
 
     // 2. 发送 Redis 消息（使用标准 V2 格式）
     try {
       const redis = await getRedisPublisher(cfg);
-      const flowType = await determineFlowType(redis, source, target);
+      flowType = await determineFlowType(redis, source, target);
       log?.info?.(`[WeGirl SessionsSend] Flow type determined: ${flowType} (source=${source}, target=${target})`);
       
       forwardMsg = {
@@ -233,6 +245,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         groupId: chatType === 'group' ? chatId : undefined,
         routingId,
         msgType: 'message',
+        fromType: 'inner',  // 标记为内部工具调用
         // 元数据
         metadata: {
           ...originalMetadata,
@@ -331,8 +344,8 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             }
 
             // 直接发送当前 agent 的回复（不聚合）- 使用标准 V2 格式
-            // 从 Redis 查询 staff 类型判断流向
-            const groupReplyFlowType = await determineFlowType(pub, target, source);
+            // 使用 reverseFlowType 计算对调流向，避免重复查询 Redis
+            const groupReplyFlowType = reverseFlowType(flowType);
             const replyMessage = {
               // 标准 V2 字段
               flowType: groupReplyFlowType,
@@ -343,6 +356,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               groupId: groupId,
               routingId,
               msgType: 'message',
+              fromType: 'inner',  // 标记为内部工具调用
               // 元数据
               metadata: {
                 replyStatus,
@@ -350,12 +364,6 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
                 taskId,
                 isFinal: true,
                 processedAt: Date.now(),
-                duration: Date.now() - createdAt,
-              },
-              timestamp: Date.now(),
-            };
-            await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);                processedAt: Date.now(),
                 duration: Date.now() - createdAt,
               },
               timestamp: Date.now(),
@@ -387,8 +395,8 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             return;
           }
           const replyId = `wegirl-reply-${Date.now()}`;
-          // 使用 determineFlowType 判断流向（当前是 Agent -> Human，应为 A2H）
-          const replyFlowType = determineFlowType(target, source);
+          // 使用 reverseFlowType 计算对调流向，避免重复查询 Redis
+          const replyFlowType = reverseFlowType(flowType);
           const replyMessage = {
             // 标准 V2 字段
             flowType: replyFlowType,
@@ -399,6 +407,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             groupId: chatType === 'group' ? chatId : undefined,
             routingId,
             msgType: 'message',
+            fromType: 'inner',  // 标记为内部工具调用
             // 元数据
             metadata: {
               inReplyTo: messageId,
