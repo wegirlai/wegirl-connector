@@ -7,6 +7,21 @@ import { wegirlSessionsSend } from './sessions-send.js';
 import { validateOptions, createSessionContext, isNoReply, generateId } from './utils.js';
 const KEY_PREFIX = 'wegirl:';
 const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
+/**
+ * StaffId 标准化规则：
+ * - 普通 ID 转小写： "HR" → "hr"
+ * - source: 前缀保留： "source:ou_xxx" → "source:ou_xxx"
+ */
+function normalizeStaffId(id) {
+    if (!id)
+        return id;
+    // 如果包含 source: 或 source：前缀，保持原样（后面是飞书 open_id）
+    if (id.startsWith('source:') || id.startsWith('source：')) {
+        return id;
+    }
+    // 普通 staffId 转小写
+    return id.toLowerCase();
+}
 // 缓存 openclaw.json 配置
 let openclawConfig = null;
 /**
@@ -86,8 +101,40 @@ async function getStaffInfo(redis, staffId) {
     };
 }
 /**
- * 获取当前实例 ID
+ * 查找相似的 Staff
+ * 简单的模糊匹配：包含查询词或查询词包含 staffId
  */
+async function findSimilarStaff(redis, query) {
+    const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
+    const results = [];
+    const lowerQuery = query.toLowerCase();
+    for (const key of keys) {
+        const staffId = key.split(':').pop();
+        const data = await redis.hgetall(key);
+        // 简单匹配：staffId 包含查询词，或查询词包含 staffId，或 name 包含查询词
+        if (staffId.includes(lowerQuery) ||
+            lowerQuery.includes(staffId) ||
+            data.name?.toLowerCase().includes(lowerQuery)) {
+            let capabilities = [];
+            if (data.capabilities) {
+                try {
+                    capabilities = JSON.parse(data.capabilities);
+                }
+                catch {
+                    capabilities = String(data.capabilities).split(',').map((s) => s.trim()).filter(Boolean);
+                }
+            }
+            results.push({
+                id: staffId,
+                type: data.type,
+                name: data.name,
+                capabilities: capabilities,
+                status: data.status,
+            });
+        }
+    }
+    return results.slice(0, 5); // 最多返回 5 个
+}
 function getCurrentInstanceId() {
     const cfg = loadOpenClawConfig();
     return cfg?.plugins?.entries?.wegirl?.config?.instanceId ||
@@ -131,18 +178,36 @@ async function writeToStream(redis, targetInstanceId, ctx, message, msgType, pay
  */
 export async function wegirlSend(options, logger) {
     const routingId = options.routingId || generateId();
+    // 标准化 source 和 target
+    const normalizedOptions = {
+        ...options,
+        source: normalizeStaffId(options.source) || '',
+        target: normalizeStaffId(options.target) || '',
+        replyTo: typeof options.replyTo === 'string'
+            ? normalizeStaffId(options.replyTo)
+            : options.replyTo,
+    };
+    // 添加详细日志
+    logger?.info?.(`=====>[WeGirlSend] Options: ${JSON.stringify(normalizedOptions)}`);
     try {
         // 1. 验证选项
-        validateOptions(options);
+        validateOptions(normalizedOptions);
         // 2. 创建 Session 上下文
-        const ctx = createSessionContext(options, routingId);
+        const ctx = createSessionContext(normalizedOptions, routingId);
         logger?.info?.(`[WeGirlSend] ${ctx.flowType}: ${ctx.source} -> ${ctx.target}`);
         // 3. 获取 Redis 连接
         const redis = await getRedisClient();
         // 4. 查询目标 Staff 信息
         const targetInfo = await getStaffInfo(redis, ctx.target);
         if (!targetInfo) {
-            throw new Error(`Target not found: ${ctx.target}`);
+            // 查询建议
+            const suggestions = await findSimilarStaff(redis, ctx.target);
+            throw new Error(`Target "${ctx.target}" 不存在！\n\n` +
+                `建议操作：\n` +
+                `1. 调用 wegirl_query({ by: "id", query: "${ctx.target}" }) 查询可用 Staff\n` +
+                `2. 从返回结果中选择正确的 target\n\n` +
+                `相似匹配：${suggestions.map((s) => s.id).join(', ') || '无'}\n\n` +
+                `常用 Staff：hr, scout, harvester, analyst, quartermaster`);
         }
         // 5. A2H：直接发布到 replies
         if (targetInfo.type === 'human') {
@@ -216,6 +281,7 @@ export async function wegirlSend(options, logger) {
             msgType: options.msgType,
             payload: options.payload,
             metadata,
+            fromType: 'inner', // wegirlSend 调用标记为 inner
             // V1 内部字段
             cfg: fullCfg,
             channel: 'wegirl',

@@ -43,6 +43,8 @@ interface SessionsSendOptions {
   payload?: Record<string, any>;
   /** 元数据 */
   metadata?: any;
+  /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
+  fromType?: 'inner' | 'outer';
 
   // V1 内部字段
   cfg: any;
@@ -175,15 +177,55 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const messageId = originalMessageId || `wegirl-${Date.now()}`;
     const createdAt = Date.now();
 
+    // 辅助函数：从 Redis 查询 staff 类型
+    async function getStaffType(redis: Redis, staffId: string): Promise<'human' | 'agent' | 'unknown'> {
+      try {
+        // 去掉 source: 前缀
+        const cleanId = staffId.startsWith('source:') ? staffId.slice(7) : staffId;
+        const data = await redis.hgetall(`wegirl:staff:${cleanId}`);
+        return data.type as 'human' | 'agent' || 'unknown';
+      } catch (err) {
+        log?.warn?.(`[WeGirl SessionsSend] Failed to get staff type for ${staffId}:`, err);
+        return 'unknown';
+      }
+    }
+
+    // 辅助函数：根据 source 和 target 判断 flowType（从 Redis 查询）
+    async function determineFlowType(redis: Redis, src: string, tgt: string): Promise<string> {
+      const [sourceType, targetType] = await Promise.all([
+        getStaffType(redis, src),
+        getStaffType(redis, tgt)
+      ]);
+      
+      log?.info?.(`[WeGirl SessionsSend] Staff types: source=${src}(${sourceType}), target=${tgt}(${targetType})`);
+      
+      if (sourceType === 'human' && targetType === 'agent') return 'H2A';
+      if (sourceType === 'agent' && targetType === 'human') return 'A2H';
+      if (sourceType === 'agent' && targetType === 'agent') return 'A2A';
+      if (sourceType === 'human' && targetType === 'human') return 'H2H';
+      
+      // 如果查询失败，使用启发式规则
+      const isHumanSource = src.startsWith('source:') || src.startsWith('ou_');
+      const isHumanTarget = tgt.startsWith('source:') || tgt.startsWith('ou_') || !tgt.includes(':');
+      
+      if (isHumanSource && !isHumanTarget) return 'H2A';
+      if (!isHumanSource && isHumanTarget) return 'A2H';
+      if (!isHumanSource && !isHumanTarget) return 'A2A';
+      return 'H2A';
+    }
+
     // 定义 forwardMsg 在更高作用域，以便后续回调函数访问
     let forwardMsg: any;
 
     // 2. 发送 Redis 消息（使用标准 V2 格式）
     try {
       const redis = await getRedisPublisher(cfg);
+      const flowType = await determineFlowType(redis, source, target);
+      log?.info?.(`[WeGirl SessionsSend] Flow type determined: ${flowType} (source=${source}, target=${target})`);
+      
       forwardMsg = {
         // 标准 V2 字段
-        flowType: 'H2A',
+        flowType: flowType,
         source: source,
         target: target,
         message,
@@ -206,7 +248,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         timestamp: Date.now()
       };
       await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
-      log?.info?.(`[WeGirl SessionsSend forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}`);
+      log?.info?.(`[WeGirl SessionsSend forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}, flowType=${flowType}`);
     } catch (err: any) {
       log?.error?.('[WeGirl SessionsSend forward] Redis forward failed:', err.message);
     }
@@ -256,7 +298,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
       deliver: async (payload: ReplyPayload, info: { kind: ReplyDispatchKind }) => {
         const text = payload.text ?? '';
-        log?.debug?.(`[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
+        log?.info?.(`>=====[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
 
         // 只处理最终回复
         if (info?.kind !== 'final' || !text.trim()) {
@@ -289,9 +331,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             }
 
             // 直接发送当前 agent 的回复（不聚合）- 使用标准 V2 格式
+            // 从 Redis 查询 staff 类型判断流向
+            const groupReplyFlowType = await determineFlowType(pub, target, source);
             const replyMessage = {
               // 标准 V2 字段
-              flowType: 'A2H',
+              flowType: groupReplyFlowType,
               source: target,
               target: source, // 群聊时为目标群
               message: text,
@@ -311,7 +355,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               timestamp: Date.now(),
             };
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}`);
+            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);                processedAt: Date.now(),
+                duration: Date.now() - createdAt,
+              },
+              timestamp: Date.now(),
+            };
+            await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
+            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);
 
             return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
@@ -337,9 +387,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             return;
           }
           const replyId = `wegirl-reply-${Date.now()}`;
+          // 使用 determineFlowType 判断流向（当前是 Agent -> Human，应为 A2H）
+          const replyFlowType = determineFlowType(target, source);
           const replyMessage = {
             // 标准 V2 字段
-            flowType: 'A2H',
+            flowType: replyFlowType,
             source: target,
             target: source,
             message: text,
@@ -365,7 +417,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           console.log('[WeGirl SessionsSend replies]', JSON.stringify(replyMessage, null, 2));
 
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-          log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies`);
+          log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies, flowType=${replyFlowType}`);
         } catch (err: any) {
           // 发送失败，发布错误回复
           try {

@@ -294,6 +294,7 @@ export class WeGirlTools {
                         originatingAccountId: replyAccountId,
                         replyTo: replyTo,
                     },
+                    fromType: 'inner', // 工具调用标记为 inner
                     // V1 内部字段
                     cfg: fullCfg,
                     channel: 'wegirl',
@@ -399,6 +400,81 @@ export class WeGirlTools {
         }
         await this.publishRoutingEvent(routingId, 'broadcast_completed', { targetCount: keys.length, successCount: results.filter(r => r.success).length });
         return { success: true, broadcast: true, targets: results.length, results, routingId };
+    }
+    /**
+     * StaffId 标准化规则：
+     * - 普通 ID 转小写： "HR" → "hr"
+     * - source: 前缀保留： "source:ou_xxx" → "source:ou_xxx"
+     */
+    normalizeStaffId(id) {
+        if (!id)
+            return id;
+        if (id.startsWith('source:') || id.startsWith('source：')) {
+            return id;
+        }
+        return id.toLowerCase();
+    }
+    /**
+     * 查询 Staff 信息
+     * 支持三种方式：id（staffId）、name（精确匹配）、capability（能力匹配）
+     */
+    async queryStaff(by, query) {
+        const results = [];
+        const normalizedQuery = this.normalizeStaffId(query) || query;
+        switch (by) {
+            case 'id': {
+                // 精确匹配 staffId
+                const data = await this.redis.hgetall(`${KEY_PREFIX}staff:${normalizedQuery}`);
+                if (data && Object.keys(data).length > 0) {
+                    results.push(this.formatStaffInfo(normalizedQuery, data));
+                }
+                break;
+            }
+            case 'name': {
+                // 精确匹配 name，扫描所有 staff
+                const keys = await this.redis.keys(`${KEY_PREFIX}staff:*`);
+                for (const key of keys) {
+                    const data = await this.redis.hgetall(key);
+                    if (data.name === query) {
+                        const staffId = key.split(':').pop();
+                        results.push(this.formatStaffInfo(staffId, data));
+                    }
+                }
+                break;
+            }
+            case 'capability': {
+                // 能力匹配
+                const agentIds = await this.redis.smembers(`${KEY_PREFIX}capability:${normalizedQuery}`);
+                for (const agentId of agentIds) {
+                    const data = await this.redis.hgetall(`${KEY_PREFIX}staff:${agentId}`);
+                    if (data && Object.keys(data).length > 0) {
+                        results.push(this.formatStaffInfo(agentId, data));
+                    }
+                }
+                break;
+            }
+        }
+        return results;
+    }
+    formatStaffInfo(staffId, data) {
+        let capabilities = [];
+        if (data.capabilities) {
+            try {
+                capabilities = JSON.parse(data.capabilities);
+            }
+            catch {
+                capabilities = String(data.capabilities).split(',').map((s) => s.trim()).filter(Boolean);
+            }
+        }
+        return {
+            id: staffId,
+            type: data.type,
+            name: data.name,
+            instanceId: data.instanceId,
+            status: data.status,
+            capabilities: capabilities,
+            lastHeartbeat: data.lastHeartbeat ? parseInt(data.lastHeartbeat) : undefined
+        };
     }
 }
 //# sourceMappingURL=tools.js.map

@@ -23,6 +23,8 @@ interface SessionsSendOptions {
     payload?: Record<string, any>;
     /** 元数据 */
     metadata?: any;
+    /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
+    fromType?: 'inner' | 'outer';
     cfg: any;
     channel: string;
     log?: any;

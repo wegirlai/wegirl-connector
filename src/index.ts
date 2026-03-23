@@ -191,7 +191,7 @@ const plugin = {
       // WeGirl Send - 统一接口
       context.registerTool({
         name: 'wegirl_send',
-        description: 'WeGirl 统一消息发送接口：支持 H2A/A2A/A2H 流向，多实例路由，任务和步骤追踪。所有 ID 使用 StaffId。',
+        description: 'WeGirl 统一消息发送接口：支持 H2A/A2A/A2H 流向，多实例路由，任务和步骤追踪。所有 ID 使用 StaffId。⚠️ 重要：调用前必须确认 target 存在！如不确定，请先调用 wegirl_query 查询可用 Staff 列表。',
         parameters: {
           type: 'object',
           properties: {
@@ -202,11 +202,11 @@ const plugin = {
             },
             source: {
               type: 'string',
-              description: '来源 StaffId（必填）'
+              description: '来源 StaffId（必填）。普通 staffId 使用小写（如 "hr", "scout"）；未入职用户使用 source: 前缀（如 "source:ou_xxx"）'
             },
             target: {
               type: 'string',
-              description: '目标 StaffId（必填）'
+              description: '目标 StaffId（必填）。注意：如果不确定 target 是否存在，请先调用 wegirl_query 查询确认。普通 staffId 使用小写；未入职用户使用 source: 前缀'
             },
             message: {
               type: 'string',
@@ -262,6 +262,56 @@ const plugin = {
             };
           } catch (err: any) {
             logger.error(`[wegirl_send] 失败:`, err.message);
+            return {
+              success: false,
+              error: err.message
+            };
+          }
+        }
+      } as any);
+
+      // WeGirl Query - Staff 查询工具
+      context.registerTool({
+        name: 'wegirl_query',
+        description: '查询可用的 Staff（Agent/Human）列表。支持通过 staffId、name 或 capabilities 查找。⚠️ 发送消息前如果不确定 target，必须先调用此工具确认！',
+        parameters: {
+          type: 'object',
+          properties: {
+            by: {
+              type: 'string',
+              enum: ['id', 'name', 'capability'],
+              description: '查询方式：id(staffId 精确匹配)、name(name 精确匹配)、capability(能力模糊匹配)'
+            },
+            query: {
+              type: 'string',
+              description: '查询关键词。例如：by=id 时查询 "hr"；by=capability 时查询 "url" 或 "harvest"'
+            }
+          },
+          required: ['by', 'query']
+        },
+        execute: async (_toolCallId: string, params: any) => {
+          logger.info(`[wegirl_query] 调用: ${JSON.stringify(params)}`);
+
+          try {
+            const { by, query } = params;
+            
+            if (!redisClient) {
+              await initRedis();
+            }
+            
+            const tools = new WeGirlTools(redisClient!, pluginConfig?.instanceId || 'instance-local', logger);
+            const results = await tools.queryStaff(by, query);
+            
+            return {
+              success: true,
+              count: results.length,
+              staff: results,
+              message: results.length > 0 
+                ? `找到 ${results.length} 个匹配的 Staff` 
+                : `未找到匹配 "${query}" 的 Staff，请尝试其他关键词`
+            };
+          } catch (err: any) {
+            logger.error(`[wegirl_query] 失败:`, err.message);
             return {
               success: false,
               error: err.message
@@ -358,7 +408,9 @@ const plugin = {
               );
 
               console.log(`[hr_manage:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
-              break;
+              
+              // 返回 null，deliver 不会发送任何消息
+              return null;
             }
             case 'list_staffs':
               result = await handleListAgents(redisClient, logger);
@@ -388,12 +440,9 @@ const plugin = {
 
           logger.info(`[hr_manage] action=${action} 执行完成`);
 
-          // create_staff 统一返回空 content，由 redis.publish 发送消息，deliver 不触发
+          // create_staff 已通过 redis 发送消息，返回 null 阻止 deliver
           if (action === 'create_staff') {
-            return {
-              content: [], // 空 content，deliver 不会发送
-              details: result
-            };
+            return null;
           }
 
           // 返回 OpenClaw 期望的格式
@@ -834,10 +883,12 @@ async function getLocalAgents(logger: any): Promise<Array<{ name: string; id: st
     const agents = config.agents?.list || [];
     logger.info(`[sync] Found ${agents.length} agents in config`);
 
-    return agents.map((a: any) => ({
-      name: a.name || a.id,
-      id: a.id
-    }));
+    return agents
+      .filter((a: any) => a != null)  // 过滤掉 null/undefined
+      .map((a: any) => ({
+        name: a.name || a.id,
+        id: a.id
+      }));
   } catch (err: any) {
     logger.error(`[sync] Failed to read local agents: ${err.message}`);
     return [];
@@ -930,7 +981,7 @@ async function syncAgentsFromLocal(
   }
 
   // 检查本地 agents：注册 Redis 中不存在的
-  for (const localAgent of localAgents || []) {
+  for (const localAgent of (localAgents || [])) {
     if (!localAgent?.name) continue;
     const accountId = `${localAgent.name}`;
     if (!redisAgentIds.includes(accountId)) {
@@ -1066,10 +1117,14 @@ async function handleProcessMessage(
   if ((chatType === 'p2p' || chatType === 'direct') && (!mentions || mentions.length === 0)) {
     logger.info(`[hr_manage:create_staff] Private message from ${source}`);
 
+    // 防护：确保 message 和 message.message 存在
+    const userMessage = message?.message || '';
+    const userId = source || 'unknown';
+
     const messageObj = await handlePrivateMessage(
       {
-        message: message.message || '',
-        userId: source,
+        message: userMessage,
+        userId: userId,
       },
       redis,
       logger,
@@ -1078,15 +1133,13 @@ async function handleProcessMessage(
 
     // 统一 publish 消息（如果 handlePrivateMessage 返回了消息对象）
     if (messageObj) {
+      // 所有消息都通过 redis 发送，不通过 deliver
       await redis.publish('wegirl:replies', JSON.stringify(messageObj));
       console.log(`[hr_manage:create_staff] Message published to wegirl:replies, msgType=${messageObj.msgType}`);
     }
 
-    // 返回空 content，deliver 不会发送
-    return {
-      content: [],
-      details: { handled: !!messageObj }
-    };
+    // 返回 null，deliver 不会发送任何消息
+    return null;
   }
 
   // 2. 群聊 @ 消息 → 判断是 agent 还是人类
