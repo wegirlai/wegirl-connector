@@ -43,6 +43,8 @@ interface SessionsSendOptions {
   payload?: Record<string, any>;
   /** 元数据 */
   metadata?: any;
+  /** 回复目标 */
+  replyTo?: string;
   /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
   fromType?: 'inner' | 'outer';
 
@@ -98,7 +100,7 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata } = options;
+  const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata, replyTo } = options;
 
   const chatId = groupId || target;
   const agentCount = stepTotalAgents;
@@ -305,8 +307,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       WasMentioned: true,
       CommandAuthorized: true,
       // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
+      // 优先使用 replyTo 参数（从 V2 消息传入），其次使用 metadata 中的 originatingTo
       OriginatingChannel: originalMetadata?.originatingChannel || channel,
-      OriginatingTo: originalMetadata?.originatingTo || source,
+      OriginatingTo: replyTo || originalMetadata?.originatingTo || source,
       // 强制指定模型，避免使用默认的 anthropic
       Model: 'kimi-coding/k2p5',
     });

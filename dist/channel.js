@@ -204,6 +204,7 @@ export const wegirlPlugin = {
                                 msgType: data.msgType,
                                 payload: data.payload,
                                 metadata: data.metadata,
+                                replyTo: replyTo, // 传递 replyTo
                                 fromType: 'outer', // startAccount 调用标记为 outer
                                 // V1 内部字段
                                 cfg: msgCfg,
