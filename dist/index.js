@@ -89,8 +89,6 @@ let wegirlTools = null;
 let globalConsumerStarted = false;
 let globalStreamClient = null;
 let globalPublisher = null;
-// Agent 就绪状态映射 (accountId -> sessionKey)
-const agentReadyMap = new Map();
 const plugin = {
     id: 'wegirl',
     name: 'WeGirl',
@@ -1175,28 +1173,6 @@ async function findOrCreateAgentSession(agentId, runtime, logger) {
     }
 }
 // ============ Agent Session 管理 ============
-/**
- * 注册 agent 就绪状态
- * 由 channel.ts 的 startAccount 调用
- */
-export function registerAgentReady(accountId, sessionKey, logger) {
-    agentReadyMap.set(accountId, sessionKey);
-    logger?.info?.(`[WeGirl register] Agent ${accountId} registered with session ${sessionKey}`);
-}
-/**
- * 注销 agent 就绪状态
- * 由 channel.ts 的 stopAccount 调用
- */
-export function unregisterAgentReady(accountId, logger) {
-    agentReadyMap.delete(accountId);
-    logger?.info?.(`[WeGirl register] Agent ${accountId} unregistered`);
-}
-/**
- * 获取 agent 的 session key
- */
-export function getAgentSessionKey(accountId) {
-    return agentReadyMap.get(accountId);
-}
 export default plugin;
 // 导出 accounts 相关函数供其他模块使用
 export { getAccount, hasAccount, accountsCache };

@@ -107,9 +107,6 @@ let globalConsumerStarted = false;
 let globalStreamClient: Redis | null = null;
 let globalPublisher: Redis | null = null;
 
-// Agent 就绪状态映射 (accountId -> sessionKey)
-const agentReadyMap = new Map<string, string>();
-
 const plugin = {
   id: 'wegirl',
   name: 'WeGirl',
@@ -1415,38 +1412,6 @@ async function findOrCreateAgentSession(
 }
 
 // ============ Agent Session 管理 ============
-
-/**
- * 注册 agent 就绪状态
- * 由 channel.ts 的 startAccount 调用
- */
-export function registerAgentReady(
-  accountId: string,
-  sessionKey: string,
-  logger?: any
-): void {
-  agentReadyMap.set(accountId, sessionKey);
-  logger?.info?.(`[WeGirl register] Agent ${accountId} registered with session ${sessionKey}`);
-}
-
-/**
- * 注销 agent 就绪状态
- * 由 channel.ts 的 stopAccount 调用
- */
-export function unregisterAgentReady(
-  accountId: string,
-  logger?: any
-): void {
-  agentReadyMap.delete(accountId);
-  logger?.info?.(`[WeGirl register] Agent ${accountId} unregistered`);
-}
-
-/**
- * 获取 agent 的 session key
- */
-export function getAgentSessionKey(accountId: string): string | undefined {
-  return agentReadyMap.get(accountId);
-}
 
 export default plugin;
 

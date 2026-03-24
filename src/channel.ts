@@ -3,8 +3,7 @@
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { getGlobalConfig, getWeGirlPluginConfig } from './config.js';
-import { registerAgentReady, unregisterAgentReady } from './index.js';
+import { getWeGirlPluginConfig } from './config.js';
 import { Registry } from './registry.js';
 
 const KEY_PREFIX = 'wegirl:';
@@ -124,16 +123,6 @@ export const wegirlPlugin = {
         log.info('[WeGirl Channel] Redis publisher ready');
         setWeGirlPublisher(publisher);
 
-        // 注册 agent 就绪状态到全局映射
-        // 从 runtime 获取当前 sessionKey
-        const sessionKey = runtime?.sessionKey || id;
-        registerAgentReady(id, sessionKey, log);
-
-        // 将 sessionKey 也写入 Redis，供全局消费者查找
-        const KEY_PREFIX = 'wegirl:';
-        await publisher.setex(`${KEY_PREFIX}agent:${id}:session`, 3600, sessionKey);
-        log.info(`[WeGirl Channel]<${id}> Agent registered with session ${sessionKey}`);
-
         setStatus({ running: true });
 
         // 注册 Agent 心跳（每个 agent 独立）
@@ -172,9 +161,7 @@ export const wegirlPlugin = {
         // 清理
         clearInterval(heartbeatInterval);
         await registry.unregisterAgent(id);
-        unregisterAgentReady(id, log);
         try {
-          await publisher.del(`${KEY_PREFIX}agent:${id}:session`);
           await publisher.quit();
         } catch { /* ignore */ }
         setWeGirlPublisher(null);
