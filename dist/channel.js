@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
 import { getWeGirlPluginConfig } from './config.js';
 import { registerAgentReady, unregisterAgentReady } from './index.js';
+import { Registry } from './registry.js';
 const KEY_PREFIX = 'wegirl:';
 export const wegirlPlugin = {
     plugin: {
@@ -116,6 +117,25 @@ export const wegirlPlugin = {
                 await publisher.setex(`${KEY_PREFIX}agent:${id}:session`, 3600, sessionKey);
                 log.info(`[WeGirl Channel]<${id}> Agent registered with session ${sessionKey}`);
                 setStatus({ running: true });
+                // 注册 Agent 心跳（每个 agent 独立）
+                const registry = new Registry(publisher, instanceId, log);
+                await registry.register({
+                    staffId: id,
+                    type: 'agent',
+                    name: id,
+                    capabilities: [],
+                    maxConcurrent: 3,
+                });
+                log.info(`[WeGirl Channel]<${id}> Agent heartbeat registered`);
+                // 启动心跳定时器
+                const heartbeatInterval = setInterval(async () => {
+                    try {
+                        await registry.heartbeat(id);
+                    }
+                    catch (err) {
+                        log.error(`[WeGirl Channel]<${id}> Heartbeat error:`, err.message);
+                    }
+                }, 30000);
                 // 等待终止信号
                 await new Promise((resolve) => {
                     const onAbort = () => {
@@ -130,6 +150,8 @@ export const wegirlPlugin = {
                     }
                 });
                 // 清理
+                clearInterval(heartbeatInterval);
+                await registry.unregisterAgent(id);
                 unregisterAgentReady(id, log);
                 try {
                     await publisher.del(`${KEY_PREFIX}agent:${id}:session`);

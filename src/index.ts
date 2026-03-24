@@ -201,29 +201,6 @@ const plugin = {
         // 加载所有 agents 和 humans 到 accounts cache
         accountsCache = await loadAccountsFromRedis(redisClient!, logger);
 
-        // 注册 Agent 心跳（如果配置了 agentId）
-        const agentId = (config as any).agentId;
-        if (agentId && redisClient) {
-          registry = new Registry(redisClient, INSTANCE_ID, logger);
-          await registry.register({
-            staffId: agentId,
-            type: 'agent',
-            name: (config as any).agentName || agentId,
-            capabilities: (config as any).capabilities || [],
-            maxConcurrent: (config as any).maxConcurrent || 3,
-          });
-          logger.info(`[WeGirl register] Agent ${agentId} registered with heartbeat`);
-
-          // 启动心跳定时器
-          setInterval(async () => {
-            try {
-              await registry!.heartbeat(agentId);
-            } catch (err: any) {
-              logger.error(`[WeGirl register] Heartbeat error:`, err.message);
-            }
-          }, 30000);
-        }
-
         // 初始化队列和路由器
         if (redisClient) {
           pendingQueue = new PendingQueue(redisClient);
