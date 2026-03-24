@@ -189,7 +189,7 @@ export async function wegirlSessionsSend(options) {
         }
         // 3. 构建 envelope
         const body = runtime.channel.reply.formatAgentEnvelope({
-            channel: '微妞AI',
+            channel: 'wegirl',
             from: source,
             timestamp: new Date(),
             body: message,
