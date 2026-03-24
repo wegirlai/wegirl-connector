@@ -146,7 +146,7 @@ function extractTarget(toolName: string, params: any): string {
   }
   
   // 其他工具：提取关键标识
-  if (params?.command) return `cmd:${params.command.substring(0, 30)}`;
+  if (params?.command) return `${params.command}`;
   if (params?.url) return `url:${params.url.substring(0, 30)}`;
   if (params?.query) return `query:${params.query.substring(0, 30)}`;
   
