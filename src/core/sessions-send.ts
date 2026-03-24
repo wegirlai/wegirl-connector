@@ -144,18 +144,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
   try {
     // 1. 使用 resolveAgentRoute 查找 agent
-    // 关键：如果 chatId 为空，则不传入 peer 参数，避免影响路由判断
     const resolveParams: any = {
       cfg,
       channel,
       accountId: target,
     };
-    if (chatId) {
-      resolveParams.peer = {
-        kind: chatType as any,
-        id: chatId,
-      };
-    }
     const route = runtime.channel.routing.resolveAgentRoute(resolveParams);
 
     // 检查 route 是否为空
@@ -327,8 +320,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         
         // 记录详细的回复信息，包括错误
         if (payload.isError) {
-          log?.error?.(`>=====${logPrefix} agent ERROR reply: ${JSON.stringify(payload)}`);
-          log?.error?.(`>=====${logPrefix} error info.kind=${info?.kind}, sessionKey=${sessionKey}`);
+          log?.error?.(`>=====${logPrefix} agent ERROR reply: kind=${info?.kind}, text=${text?.substring(0, 200)}, payload=${JSON.stringify(payload)}`);
         } else {
           log?.info?.(`>=====${logPrefix} agent reply: ${JSON.stringify(payload)}`);
         }
@@ -483,7 +475,10 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         }
       },
       onError: (error: unknown, info: { kind: ReplyDispatchKind }) => {
-        log?.error?.(`${logPrefix} deliver error: ${error}`);
+        const errorDetail = error instanceof Error 
+          ? `${error.message}\n${error.stack}` 
+          : JSON.stringify(error);
+        log?.error?.(`${logPrefix} deliver error [kind=${info.kind}]: ${errorDetail}`);
       },
     });
 
