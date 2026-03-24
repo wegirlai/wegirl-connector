@@ -100,7 +100,7 @@ async function getRedisPublisher(cfg: any): Promise<Redis> {
  * 5. Gateway 自动处理 Agent 回复的路由
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  const { message, cfg: originalCfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata, replyTo } = options;
+  const { message, cfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, payload, metadata: originalMetadata, replyTo } = options;
 
   const chatId = groupId || target;
   const agentCount = stepTotalAgents;
@@ -109,16 +109,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
   const messageId = originalMetadata?.messageId;
   const originalMessageId = messageId;
 
-  // 添加模型配置到 cfg
-  const cfg = {
-    ...originalCfg,
-    models: {
-      mode: 'merge' as const,
-      provider: 'kimi-coding',
-      modelId: 'k2p5',
-    },
-  };
-
+  // 直接使用传入的 cfg，不重新构建
   log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
 
   // 获取 PluginRuntime
@@ -148,6 +139,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
   log?.debug?.('[WeGirl SessionsSend] Runtime check passed');
 
+  // 声明 logPrefix，在获取 sessionKey 后更新
+  let logPrefix = '[WeGirl SessionsSend]';
+
   try {
     // 1. 使用 resolveAgentRoute 查找 agent
     // 关键：如果 chatId 为空，则不传入 peer 参数，避免影响路由判断
@@ -172,7 +166,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
 
     const sessionKey = route.sessionKey;
     const agentId = route.agentId;
-    log?.info?.(`[WeGirl SessionsSend] Route resolved: agentId=${agentId}, sessionKey=${sessionKey}, matchedBy=${route.matchedBy}`);
+    
+    // 更新 logPrefix 包含 sessionKey
+    logPrefix = `[WeGirl SessionsSend ${sessionKey}]`;
+    
+    log?.info?.(`${logPrefix} Route resolved: agentId=${agentId}, sessionKey=${sessionKey}, matchedBy=${route.matchedBy}`);
 
     // 使用原始消息的 routingId 和 messageId（如果提供），否则生成新的
     const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
@@ -187,7 +185,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         const data = await redis.hgetall(`wegirl:staff:${cleanId}`);
         return data.type as 'human' | 'agent' || 'unknown';
       } catch (err) {
-        log?.warn?.(`[WeGirl SessionsSend] Failed to get staff type for ${staffId}:`, err);
+        log?.warn?.(`${logPrefix} Failed to get staff type for ${staffId}:`, err);
         return 'unknown';
       }
     }
@@ -199,7 +197,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         getStaffType(redis, tgt)
       ]);
       
-      log?.info?.(`[WeGirl SessionsSend] Staff types: source=${src}(${sourceType}), target=${tgt}(${targetType})`);
+      log?.info?.(`${logPrefix} Staff types: source=${src}(${sourceType}), target=${tgt}(${targetType})`);
       
       if (sourceType === 'human' && targetType === 'agent') return 'H2A';
       if (sourceType === 'agent' && targetType === 'human') return 'A2H';
@@ -235,7 +233,7 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     try {
       const redis = await getRedisPublisher(cfg);
       flowType = await determineFlowType(redis, source, target);
-      log?.info?.(`[WeGirl SessionsSend] Flow type determined: ${flowType} (source=${source}, target=${target})`);
+      log?.info?.(`${logPrefix} Flow type determined: ${flowType} (source=${source}, target=${target})`);
       
       forwardMsg = {
         // 标准 V2 字段
@@ -263,9 +261,9 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         timestamp: Date.now()
       };
       await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
-      log?.info?.(`[WeGirl SessionsSend forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}, flowType=${flowType}`);
+      log?.info?.(`${logPrefix} forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}, flowType=${flowType}`);
     } catch (err: any) {
-      log?.error?.('[WeGirl SessionsSend forward] Redis forward failed:', err.message);
+      log?.error?.(`${logPrefix} forward] Redis forward failed:`, err.message);
     }
 
     // 3. 构建 envelope
@@ -287,9 +285,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // Provider/Surface: wegirl（当前渠道）
     // OriginatingChannel/OriginatingTo: 目标渠道，Gateway 会自动路由回复到该渠道
     // 使用 metadata 中的 originatingChannel/originatingTo 设置回复路由
+    
+    // 关键：在消息开头嵌入 routingId，让 agent 可以提取使用
+    const messageWithRouting = `[ROUTING_ID:${routingId}]\n${message}`;
+    
     const inboundCtx = runtime.channel.reply.finalizeInboundContext({
       Body: body,
-      BodyForAgent: message,
+      BodyForAgent: messageWithRouting,  // 包含 routingId 的消息
       RawBody: message,
       CommandBody: message,
       From: source,
@@ -308,13 +310,14 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       CommandAuthorized: true,
       // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
       // 优先使用 replyTo 参数（从 V2 消息传入），其次使用 metadata 中的 originatingTo
+      // 注意：OriginatingTo 必须是字符串，replyTo 是数组，取第一个元素
       OriginatingChannel: originalMetadata?.originatingChannel || channel,
-      OriginatingTo: replyTo || originalMetadata?.originatingTo || source,
+      OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
       // 强制指定模型，避免使用默认的 anthropic
       Model: 'kimi-coding/k2p5',
     });
 
-    log?.info?.(`[WeGirl SessionsSend] dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
+    log?.info?.(`${logPrefix} dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
 
     // 创建 dispatcher，处理 Agent 回复
     // 当 channel="wegirl" 时，通过 outbound 发送；其他情况交由 Gateway 自动路由
@@ -324,10 +327,10 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         
         // 记录详细的回复信息，包括错误
         if (payload.isError) {
-          log?.error?.(`>=====[WeGirl SessionsSend] agent ERROR reply: ${JSON.stringify(payload)}`);
-          log?.error?.(`>=====[WeGirl SessionsSend] error info.kind=${info?.kind}, sessionKey=${sessionKey}`);
+          log?.error?.(`>=====${logPrefix} agent ERROR reply: ${JSON.stringify(payload)}`);
+          log?.error?.(`>=====${logPrefix} error info.kind=${info?.kind}, sessionKey=${sessionKey}`);
         } else {
-          log?.info?.(`>=====[WeGirl SessionsSend] agent reply: ${JSON.stringify(payload)}`);
+          log?.info?.(`>=====${logPrefix} agent reply: ${JSON.stringify(payload)}`);
         }
 
         // 只处理最终回复
@@ -339,12 +342,12 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         // 每个 agent 完成时立即回复（不等待聚合）
         if (chatType === 'group' && taskId && agentCount && agentCount > 1) {
           const effectiveAgentId = currentAgentId || agentId;
-          log?.info?.(`[WeGirl SessionsSend] Group multi-agent reply: taskId=${taskId}, agent=${effectiveAgentId}`);
+          log?.info?.(`${logPrefix} Group multi-agent reply: taskId=${taskId}, agent=${effectiveAgentId}`);
 
           try {
             const pub = await getRedisPublisher(cfg);
             if (!pub) {
-              log?.error?.(`[WeGirl SessionsSend] Redis publisher not connected`);
+              log?.error?.(`${logPrefix} Redis publisher not connected`);
               return;
             }
 
@@ -386,11 +389,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               timestamp: Date.now(),
             };
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`[WeGirl SessionsSend] Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);
+            log?.info?.(`${logPrefix} Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);
 
             return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
-            log?.error?.(`[WeGirl SessionsSend] Group reply failed:`, err.message);
+            log?.error?.(`${logPrefix} Group reply failed:`, err.message);
           }
           return;
         }
@@ -400,15 +403,15 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
         // 其他 channel 由 Gateway 自动路由，不处理
         const effectiveChannel = originalMetadata?.originatingChannel || channel;
         if (effectiveChannel !== 'wegirl') {
-          log?.debug?.(`[WeGirl SessionsSend] effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
+          log?.debug?.(`${logPrefix} effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
           return;
         }
 
-        log?.info?.(`[WeGirl SessionsSend replies] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
+        log?.info?.(`${logPrefix} replies] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
         try {
           const pub = await getRedisPublisher(cfg);
           if (!pub) {
-            log?.error?.(`[WeGirl SessionsSend replies] Redis publisher not connected`);
+            log?.error?.(`${logPrefix} replies] Redis publisher not connected`);
             return;
           }
           const replyId = `wegirl-reply-${Date.now()}`;
@@ -437,13 +440,13 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             },
             timestamp: Date.now(),
           };
-          //log?.info?.(`[WeGirl SessionsSend] replyMessage params:`, JSON.stringify(replyMessage, null, 2));
+          //log?.info?.(`${logPrefix} replyMessage params:`, JSON.stringify(replyMessage, null, 2));
 
           // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
-          console.log('[WeGirl SessionsSend replies]', JSON.stringify(replyMessage, null, 2));
+          console.log(`${logPrefix} replies]`, JSON.stringify(replyMessage, null, 2));
 
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-          log?.info?.(`[WeGirl SessionsSend replies] Reply published to wegirl:replies, flowType=${replyFlowType}`);
+          log?.info?.(`${logPrefix} replies] Reply published to wegirl:replies, flowType=${replyFlowType}`);
         } catch (err: any) {
           // 发送失败，发布错误回复
           try {
@@ -476,11 +479,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               await pub.publish('wegirl:replies', JSON.stringify(errorReply));
             }
           } catch { }
-          log?.error?.(`[WeGirl SessionsSend replies] Failed to publish reply: ${err.message}`);
+          log?.error?.(`${logPrefix} replies] Failed to publish reply: ${err.message}`);
         }
       },
       onError: (error: unknown, info: { kind: ReplyDispatchKind }) => {
-        log?.error?.(`[WeGirl SessionsSend] deliver error: ${error}`);
+        log?.error?.(`${logPrefix} deliver error: ${error}`);
       },
     });
 
@@ -499,10 +502,10 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     });
 
     markDispatchIdle();
-    log?.info?.(`[WeGirl SessionsSend] dispatch complete (queuedFinal=${result.queuedFinal}, replies=${result.counts?.final ?? 0})`);
+    log?.info?.(`${logPrefix} dispatch complete (queuedFinal=${result.queuedFinal}, replies=${result.counts?.final ?? 0})`);
 
   } catch (err: any) {
-    log?.error?.(`[WeGirl SessionsSend] Failed: ${err.message}`);
+    log?.error?.(`${logPrefix} Failed: ${err.message}`);
     throw err;
   }
 }

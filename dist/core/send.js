@@ -1,10 +1,9 @@
 // src/core/send.ts - V2 发送层：参数适配 + 跨实例路由
 // 本地投递统一调用 V1 (sessions-send.ts)
 import Redis from 'ioredis';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { wegirlSessionsSend } from './sessions-send.js';
-import { validateOptions, createSessionContext, isNoReply, generateId } from './utils.js';
+import { getGlobalConfig, getWeGirlPluginConfig, getRedisConfig } from '../config.js';
+import { validateOptions, createSessionContext, isNoReply } from './utils.js';
 const KEY_PREFIX = 'wegirl:';
 const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
 /**
@@ -22,24 +21,6 @@ function normalizeStaffId(id) {
     // 普通 staffId 转小写
     return id.toLowerCase();
 }
-// 缓存 openclaw.json 配置
-let openclawConfig = null;
-/**
- * 从 openclaw.json 加载配置
- */
-function loadOpenClawConfig() {
-    if (openclawConfig)
-        return openclawConfig;
-    try {
-        const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
-        const content = readFileSync(configPath, 'utf-8');
-        openclawConfig = JSON.parse(content);
-        return openclawConfig;
-    }
-    catch (err) {
-        return null;
-    }
-}
 // 全局 Redis 连接缓存
 let redisClient = null;
 let redisConnectPromise = null;
@@ -54,13 +35,9 @@ async function getRedisClient() {
         return redisConnectPromise;
     }
     redisConnectPromise = (async () => {
-        // 统一从 openclaw.json 的 plugins.wegirl.config 读取
-        const cfg = loadOpenClawConfig();
-        const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
-        const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
-        const password = pluginCfg?.redisPassword;
-        const db = pluginCfg?.redisDb ?? 1;
-        const client = new Redis(redisUrl, {
+        // 使用全局配置
+        const { url, password, db } = getRedisConfig();
+        const client = new Redis(url, {
             password,
             db,
             retryStrategy: (times) => Math.min(times * 50, 2000),
@@ -136,9 +113,7 @@ async function findSimilarStaff(redis, query) {
     return results.slice(0, 5); // 最多返回 5 个
 }
 function getCurrentInstanceId() {
-    const cfg = loadOpenClawConfig();
-    return cfg?.plugins?.entries?.wegirl?.config?.instanceId ||
-        'instance-local';
+    return getWeGirlPluginConfig()?.instanceId || 'instance-local';
 }
 /**
  * 写入 Redis Stream（跨实例投递）
@@ -167,6 +142,33 @@ async function writeToStream(redis, targetInstanceId, ctx, message, msgType, pay
     await redis.xadd(streamKey, '*', ...entries);
 }
 /**
+ * 获取当前 session 的 routingId
+ * 方案 B：routingId 必须显式传入，不再自动生成
+ */
+async function getRoutingId(options, redis, logger) {
+    // routingId 必须显式提供
+    if (!options.routingId) {
+        throw new Error(`Missing required parameter: routingId\n\n` +
+            `Usage: await wegirl_send({\n` +
+            `  flowType: 'A2A',\n` +
+            `  source: 'scout',\n` +
+            `  target: 'hr',\n` +
+            `  message: '...',\n` +
+            `  replyTo: 'tiger',\n` +
+            `  routingId: message.routingId  // 从当前消息中提取\n` +
+            `});\n\n` +
+            `Note: routingId must be extracted from the current message context to maintain trace consistency.`);
+    }
+    return options.routingId;
+}
+/**
+ * 保存 routingId 到 session，供后续调用使用
+ */
+async function saveSessionRoutingId(source, routingId, redis, ttl = 3600) {
+    const sessionRoutingKey = `${KEY_PREFIX}session:${source}:routingId`;
+    await redis.setex(sessionRoutingKey, ttl, routingId);
+}
+/**
  * V2 核心发送函数
  *
  * 职责：
@@ -177,7 +179,10 @@ async function writeToStream(redis, targetInstanceId, ctx, message, msgType, pay
  * 5. 本地 → 调用 V1 wegirlSessionsSend
  */
 export async function wegirlSend(options, logger) {
-    const routingId = options.routingId || generateId();
+    // 先获取 Redis 连接以查询/保存 routingId
+    const redis = await getRedisClient();
+    // 获取 routingId（保持调用链一致）
+    const routingId = await getRoutingId(options, redis, logger);
     // 标准化 source 和 target
     const normalizedOptions = {
         ...options,
@@ -195,10 +200,11 @@ export async function wegirlSend(options, logger) {
         // 2. 创建 Session 上下文
         const ctx = createSessionContext(normalizedOptions, routingId);
         logger?.info?.(`[WeGirlSend] ${ctx.flowType}: ${ctx.source} -> ${ctx.target}`);
-        // 3. 获取 Redis 连接
-        const redis = await getRedisClient();
         // 4. 查询目标 Staff 信息
         const targetInfo = await getStaffInfo(redis, ctx.target);
+        // 保存 routingId 到当前 session（供后续调用保持一致）
+        await saveSessionRoutingId(ctx.source, routingId, redis);
+        logger?.debug?.(`[WeGirlSend] Saved routingId ${routingId} for session ${ctx.source}`);
         if (!targetInfo) {
             // 查询建议
             const suggestions = await findSimilarStaff(redis, ctx.target);
@@ -252,8 +258,8 @@ export async function wegirlSend(options, logger) {
         }
         // 8. 本地：调用 V1 统一投递
         logger?.info?.(`[WeGirlSend] Local delivery to ${ctx.target} via V1`);
-        // 加载完整配置
-        const fullCfg = loadOpenClawConfig() || {};
+        // 使用全局配置
+        const fullCfg = getGlobalConfig() || {};
         // 构建 V1 参数
         const chatId = ctx.chatType === 'group'
             ? (ctx.groupId || ctx.source)

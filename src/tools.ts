@@ -4,26 +4,10 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { wegirlSessionsSend } from './core/sessions-send.js';
 import { getWeGirlRuntime } from './runtime.js';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { getGlobalConfig, getWeGirlPluginConfig } from './config.js';
 import { hasAccount, getAccount } from './index.js';
 
 const KEY_PREFIX = 'wegirl:';
-
-// 缓存 openclaw.json 配置
-let openclawConfig: any = null;
-
-function loadOpenClawConfig(): any {
-  if (openclawConfig) return openclawConfig;
-  try {
-    const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
-    const content = readFileSync(configPath, 'utf-8');
-    openclawConfig = JSON.parse(content);
-    return openclawConfig;
-  } catch (err: any) {
-    return null;
-  }
-}
 interface RoutingTarget {
   mode: 'agent' | 'human' | 'capability' | 'workflow' | 'broadcast';
   agentId?: string;
@@ -375,8 +359,8 @@ export class WeGirlTools {
         // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
         // 关键：chatId 设为空，避免 peer 影响路由判断
         // 关键：accountId 应该是目标 agentId（如 scout），用于匹配 binding
-        // 关键：加载完整配置，包含 bindings
-        const fullCfg = loadOpenClawConfig() || { channels: {} };
+        // 关键：使用全局配置
+        const fullCfg = getGlobalConfig() || { channels: {} };
         
         // 从 plugin config 获取 Redis 配置
         const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};

@@ -22,7 +22,20 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.2 (2026-03-23) ⭐ Current
+### v2.1.3 (2026-03-24) ⭐ Current
+
+**全局配置管理优化**:
+- ✅ 新增 `config.ts` 全局配置管理模块
+- ✅ `startAccount` 直接使用传入的 `ctx.cfg` 设置全局变量
+- ✅ `wegirlSessionsSend` 直接使用传入的 cfg，不重新构建
+- ✅ 各模块统一使用 `getGlobalConfig()` 获取配置
+- ✅ 修复 `replyTo` 数组解析问题
+
+详见 [MILESTONE-v2.1.3.md](./MILESTONE-v2.1.3.md)
+
+---
+
+### v2.1.2 (2026-03-23)
 
 **消息来源标记**:
 - ✅ `forwardMsg` 和 `replyMessage` 添加 `fromType: 'inner'` 字段

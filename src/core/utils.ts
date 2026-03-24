@@ -32,6 +32,9 @@ export function validateOptions(options: WeGirlSendOptions): void {
   if (!options.message) {
     throw new Error('message is required');
   }
+  if (options.replyTo === undefined || options.replyTo === null) {
+    throw new Error('replyTo is required');
+  }
   
   // 2. 验证 flowType
   const validFlowTypes: FlowType[] = ['H2A', 'A2A', 'A2H'];

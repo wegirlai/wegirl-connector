@@ -1,28 +1,9 @@
 // src/channel.ts - Channel Plugin 定义
 import Redis from 'ioredis';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
+import { getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig } from './config.js';
 const KEY_PREFIX = 'wegirl:';
-// 缓存 openclaw.json 配置
-let openclawConfig = null;
-/**
- * 从 openclaw.json 加载配置
- */
-function loadOpenClawConfig() {
-    if (openclawConfig)
-        return openclawConfig;
-    try {
-        const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
-        const content = readFileSync(configPath, 'utf-8');
-        openclawConfig = JSON.parse(content);
-        return openclawConfig;
-    }
-    catch (err) {
-        return null;
-    }
-}
 export const wegirlPlugin = {
     plugin: {
         id: "wegirl",
@@ -48,9 +29,8 @@ export const wegirlPlugin = {
             },
             resolveAccount: (cfg, id) => {
                 const accountId = id || 'default';
-                // 统一从 openclaw.json 的 plugins.wegirl.config 读取
-                const fullCfg = loadOpenClawConfig() || {};
-                const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
+                // 使用全局配置
+                const pluginCfg = getWeGirlPluginConfig();
                 return {
                     accountId,
                     redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
@@ -103,10 +83,15 @@ export const wegirlPlugin = {
         },
         gateway: {
             startAccount: async (ctx) => {
-                const { accountId, abortSignal, log, setStatus } = ctx;
+                const { cfg: ctxCfg, accountId, abortSignal, log, setStatus } = ctx;
                 const id = accountId || 'default';
-                // 直接读取 openclaw.json 配置
-                const fullCfg = loadOpenClawConfig() || {};
+                // 如果 OpenClaw 传入了 cfg，直接设置到全局变量
+                if (ctxCfg) {
+                    setGlobalConfig(ctxCfg);
+                    log.info(`[WeGirl Channel]<${id}> Global config set from startAccount ctx.cfg`);
+                }
+                // 使用全局配置（已由 startAccount 设置或之前初始化）
+                const fullCfg = getGlobalConfig() || {};
                 const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
                 const instanceId = pluginCfg?.instanceId || 'instance-local';
                 log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
@@ -178,19 +163,33 @@ export const wegirlPlugin = {
                         const message = data.message;
                         const chatType = data.chatType || 'direct';
                         const groupId = data.groupId;
-                        const replyTo = data.replyTo;
-                        const routingId = data.routingId;
+                        // 修复：replyTo 可能是数组或字符串，统一转换为字符串
+                        const replyToRaw = data.replyTo;
+                        const replyTo = Array.isArray(replyToRaw)
+                            ? (replyToRaw[0] || '')
+                            : (replyToRaw || '');
+                        const routingId = data.routingId || `wegirl-${Date.now()}`;
                         // 验证必要字段
                         if (!flowType || !source || !target) {
                             log.warn(`[WeGirl Channel]<${id}> Invalid message format: missing flowType/source/target`, { keys: Object.keys(data) });
                             return;
                         }
-                        log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}`);
+                        log.info(`[WeGirl Channel]<${id}> Processing message: ${flowType} ${source} -> ${target}, routingId=${routingId}`);
+                        // 保存 routingId 到 Redis（供目标 agent 后续调用保持一致）
+                        try {
+                            const KEY_PREFIX = 'wegirl:';
+                            // 关键：保存到 target 的 session，这样接收方 agent 调用时能继承 routingId
+                            const sessionRoutingKey = `${KEY_PREFIX}session:${target}:routingId`;
+                            await publisher.setex(sessionRoutingKey, 3600, routingId);
+                            log.debug(`[WeGirl Channel]<${id}> Saved routingId ${routingId} for target session ${target}`);
+                        }
+                        catch (err) {
+                            log.warn(`[WeGirl Channel]<${id}> Failed to save routingId: ${err.message}`);
+                        }
                         // 直接调用 V1 核心层 wegirlSessionsSend，跳过 V2 转换
                         // 参数名与 wegirl_send 标准保持一致
                         try {
-                            // 获取配置
-                            const msgCfg = loadOpenClawConfig() || {};
+                            // 使用 startAccount 已加载的 fullCfg，避免重复加载配置
                             await wegirlSessionsSend({
                                 message,
                                 source, // V2 source
@@ -207,7 +206,7 @@ export const wegirlPlugin = {
                                 replyTo: replyTo, // 传递 replyTo
                                 fromType: 'outer', // startAccount 调用标记为 outer
                                 // V1 内部字段
-                                cfg: msgCfg,
+                                cfg: fullCfg, // 使用已加载的配置
                                 channel: 'wegirl',
                                 log,
                             });

@@ -1,7 +1,5 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
@@ -12,6 +10,7 @@ import { registerEventHandlers } from './event-handlers.js';
 import { executeCreateAgent } from './hr-manage-core.js';
 import { checkIsAgent, handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';  // 新核心模块
+import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, loadOpenClawConfig } from './config.js';
 import type { MessageEnvelope } from './protocol.js';
 import type {
   PluginConfig,
@@ -20,24 +19,7 @@ import type {
   ServiceConfig,
 } from './types.js';
 
-// 缓存 openclaw.json 配置
-let openclawConfig: any = null;
 let accountsCache: Map<string, any> = new Map();
-
-/**
- * 从 openclaw.json 加载配置
- */
-function loadOpenClawConfig(): any {
-  if (openclawConfig) return openclawConfig;
-  try {
-    const configPath = join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
-    const content = readFileSync(configPath, 'utf-8');
-    openclawConfig = JSON.parse(content);
-    return openclawConfig;
-  } catch (err: any) {
-    return null;
-  }
-}
 
 /**
  * 从 Redis 加载所有 agents 和 humans 到 accounts
@@ -127,9 +109,12 @@ const plugin = {
   register(context: PluginContext): void {
     const logger = context.logger;
 
-    // 直接读取 openclaw.json 配置
-    const fullConfig = loadOpenClawConfig();
-    const pluginConfig = fullConfig?.plugins?.entries?.wegirl?.config || {};
+    // 初始化全局配置（从文件加载）
+    initGlobalConfig();
+    
+    // 使用全局配置
+    const fullConfig = getGlobalConfig();
+    const pluginConfig = getWeGirlPluginConfig();
 
     // 实例ID（从配置读取）
     const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
@@ -267,7 +252,7 @@ const plugin = {
       // WeGirl Send - 统一接口
       context.registerTool({
         name: 'wegirl_send',
-        description: 'WeGirl 统一消息发送接口：支持 H2A/A2A/A2H 流向，多实例路由，任务和步骤追踪。所有 ID 使用 StaffId。⚠️ 重要：调用前必须确认 target 存在！如不确定，请先调用 wegirl_query 查询可用 Staff 列表。',
+        description: 'WeGirl 统一消息发送接口：支持 H2A/A2A/A2H 流向，多实例路由，任务和步骤追踪。所有 ID 使用 StaffId。',
         parameters: {
           type: 'object',
           properties: {
@@ -282,7 +267,7 @@ const plugin = {
             },
             target: {
               type: 'string',
-              description: '目标 StaffId（必填）。注意：如果不确定 target 是否存在，请先调用 wegirl_query 查询确认。普通 staffId 使用小写；未入职用户使用 source: 前缀'
+              description: '目标 StaffId（必填）。普通 staffId 使用小写；未入职用户使用 source: 前缀'
             },
             message: {
               type: 'string',
@@ -303,7 +288,7 @@ const plugin = {
                 { type: 'string' },
                 { type: 'array', items: { type: 'string' } }
               ],
-              description: '回复目标 StaffId。默认: 单聊=source, 群聊=target。使用 "system:no_reply" 表示不回复'
+              description: '回复目标 StaffId（必填）。指定谁应该收到回复。单聊时通常是原始发送者，群聊时可以是多个目标。使用 "system:no_reply" 表示不回复'
             },
             taskId: {
               type: 'string',
@@ -319,10 +304,10 @@ const plugin = {
             },
             routingId: {
               type: 'string',
-              description: '路由追踪ID（可选）'
+              description: '路由追踪ID（必填）。从当前消息上下文中提取（如 message.routingId 或 context.RoutingId），用于保持调用链一致。整个 workflow 中必须传递相同的 routingId。'
             }
           },
-          required: ['flowType', 'source', 'target', 'message']
+          required: ['flowType', 'source', 'target', 'message', 'replyTo', 'routingId']
         },
         execute: async (_toolCallId: string, params: any) => {
           logger.info(`[wegirl_send] 调用: ${JSON.stringify(params)}`);
@@ -338,74 +323,6 @@ const plugin = {
             };
           } catch (err: any) {
             logger.error(`[wegirl_send] 失败:`, err.message);
-            return {
-              success: false,
-              error: err.message
-            };
-          }
-        }
-      } as any);
-
-      // WeGirl Query - Staff 查询工具
-      context.registerTool({
-        name: 'wegirl_query',
-        description: '查询可用的 Staff（Agent/Human）列表。支持通过 staffId、name 或 capabilities 查找。⚠️ 发送消息前如果不确定 target，必须先调用此工具确认！',
-        parameters: {
-          type: 'object',
-          properties: {
-            by: {
-              type: 'string',
-              enum: ['id', 'name', 'capability'],
-              description: '查询方式：id(staffId 精确匹配)、name(name 精确匹配)、capability(能力模糊匹配)'
-            },
-            query: {
-              type: 'string',
-              description: '查询关键词。例如：by=id 时查询 "hr"；by=capability 时查询 "url" 或 "harvest"'
-            }
-          },
-          required: ['by', 'query']
-        },
-        execute: async (_toolCallId: string, params: any) => {
-          logger.info(`[wegirl_query] 调用: ${JSON.stringify(params)}`);
-          logger.info(`[wegirl_query] redisClient status: ${redisClient ? (redisClient.status || 'unknown') : 'null'}`);
-
-          try {
-            const { by, query } = params;
-            
-            logger.info(`[wegirl_query] 参数解析: by=${by}, query=${query}`);
-            
-            if (!redisClient) {
-              logger.info(`[wegirl_query] redisClient 为空，尝试初始化...`);
-              await initRedis();
-            }
-            
-            if (!redisClient) {
-              logger.error(`[wegirl_query] Redis 初始化失败`);
-              return {
-                success: false,
-                error: 'Redis 连接失败'
-              };
-            }
-            
-            logger.info(`[wegirl_query] 创建 WeGirlTools 实例...`);
-            const tools = new WeGirlTools(redisClient!, pluginConfig?.instanceId || 'instance-local', logger);
-            
-            logger.info(`[wegirl_query] 调用 queryStaff: by=${by}, query=${query}`);
-            const results = await tools.queryStaff(by, query);
-            
-            logger.info(`[wegirl_query] 查询结果: ${results.length} 条记录`);
-            
-            return {
-              success: true,
-              count: results.length,
-              staff: results,
-              message: results.length > 0 
-                ? `找到 ${results.length} 个匹配的 Staff` 
-                : `未找到匹配 "${query}" 的 Staff，请尝试其他关键词`
-            };
-          } catch (err: any) {
-            logger.error(`[wegirl_query] 失败:`, err.message);
-            logger.error(`[wegirl_query] 错误堆栈:`, err.stack);
             return {
               success: false,
               error: err.message
