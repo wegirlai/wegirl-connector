@@ -1,4 +1,5 @@
 // src/event-handlers.ts - OpenClaw 事件处理器注册
+// 事件通过 Pub/Sub 发布到 wegirl:events，不持久化存储
 
 import type { PluginContext, PluginConfig } from './types.js';
 import type Redis from 'ioredis';
@@ -101,38 +102,28 @@ export function registerEventHandlers(ctx: EventHandlerContext): void {
     persistEvent('session_ended', event, ctx);
   });
 
-  // Tool 调用前
+  // Tool 调用前 (兼容 2026.2.23)
   context.on('before_tool_call', (event: any) => {
-    const toolName = event?.toolName || 'unknown';
-    const params = event?.params || {};
+    // 2026.2.23: event.tool, event.args
+    // 2026.3.23: event.toolName, event.params
+    const toolName = event?.toolName || event?.tool || 'unknown';
+    const params = event?.params || event?.args || {};
+    const target = extractTarget(toolName, params);
 
-    // 批量调用时 params 可能是数组
-    if (Array.isArray(params)) {
-      const targets = params.map(p => extractTarget(toolName, p)).join(', ');
-      logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (batch: ${params.length} items, targets: ${targets})`);
-    } else {
-      const target = extractTarget(toolName, params);
-      logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (target: ${target})`);
-    }
-
+    logger.info(`[WeGirl Event] before_tool_call - ${toolName} (${target})`);
     persistEvent('before_tool_call', event, ctx);
   });
 
-  // Tool 调用后
+  // Tool 调用后 (兼容 2026.2.23)
   context.on('after_tool_call', (event: any) => {
-    const toolName = event?.toolName || 'unknown';
-    const params = event?.params || {};
-    const duration = event?.durationMs || 'unknown';
+    // 2026.2.23: event.tool, event.args, event.duration
+    // 2026.3.23: event.toolName, event.params, event.durationMs
+    const toolName = event?.toolName || event?.tool || 'unknown';
+    const params = event?.params || event?.args || {};
+    const duration = event?.durationMs || event?.duration || 'unknown';
+    const target = extractTarget(toolName, params);
 
-    // 批量调用时 params 可能是数组
-    if (Array.isArray(params)) {
-      const targets = params.map(p => extractTarget(toolName, p)).join(', ');
-      logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (batch: ${params.length} items, targets: ${targets}, ${duration}ms)`);
-    } else {
-      const target = extractTarget(toolName, params);
-      logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (target: ${target}, ${duration}ms)`);
-    }
-
+    logger.info(`[WeGirl Event] after_tool_call - ${toolName} (${target}) ${duration}ms`);
     persistEvent('after_tool_call', event, ctx);
   });
 
@@ -167,7 +158,7 @@ function extractTarget(toolName: string, params: any): string {
 }
 
 /**
- * 事件持久化到 Redis
+ * 事件发布到 Redis Pub/Sub (不存储)
  */
 async function persistEvent(
   eventType: string,
@@ -176,9 +167,6 @@ async function persistEvent(
 ): Promise<void> {
   const redisClient = ctx.getRedisClient();
   if (!redisClient || redisClient.status !== 'ready') return;
-
-  const keyPrefix = ctx.pluginConfig?.keyPrefix || 'openclaw:events:';
-  const ttl = ctx.pluginConfig?.ttl || 86400 * 7;
 
   const timestamp = Date.now();
   const eventId = randomUUID();
@@ -190,13 +178,9 @@ async function persistEvent(
     payload: JSON.stringify(payload),
     sessionId: payload?.sessionId || 'global',
     userId: payload?.userId || 'system',
+    instanceId: ctx.instanceId,
   };
 
-  const pipeline = redisClient.pipeline();
-  pipeline.hset(`${keyPrefix}data:${eventId}`, eventData);
-  pipeline.zadd(`${keyPrefix}timeline`, timestamp, eventId);
-  pipeline.sadd(`${keyPrefix}type:${eventType}`, eventId);
-  pipeline.expire(`${keyPrefix}data:${eventId}`, ttl);
-
-  await pipeline.exec();
+  // 发布到 Pub/Sub，不存储
+  await redisClient.publish('wegirl:events', JSON.stringify(eventData));
 }

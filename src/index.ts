@@ -9,7 +9,8 @@ import { WeGirlTools } from './tools.js';
 import { registerEventHandlers } from './event-handlers.js';
 import { executeCreateAgent } from './hr-manage-core.js';
 import { checkIsAgent, handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
-import { wegirlSend } from './core/index.js';  // 新核心模块
+import { wegirlSend } from './core/index.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, loadOpenClawConfig } from './config.js';
 import type { MessageEnvelope } from './protocol.js';
 import type {
@@ -27,31 +28,31 @@ let accountsCache: Map<string, any> = new Map();
 async function loadAccountsFromRedis(redis: Redis, logger?: any): Promise<Map<string, any>> {
   const KEY_PREFIX = 'wegirl:';
   const accounts = new Map<string, any>();
-  
+
   try {
     // 获取所有 staff keys
     const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
     logger?.info?.(`[WeGirl] Loading accounts from Redis: found ${keys.length} staff keys`);
-    
+
     for (const key of keys) {
       const staffId = key.toString().replace(`${KEY_PREFIX}staff:`, '');
       // 跳过特殊 keys
       if (staffId.includes(':') && !staffId.startsWith('source:')) continue;
-      
+
       const data = await redis.hgetall(key);
       if (!data || Object.keys(data).length === 0) continue;
-      
+
       // 将 Buffer 转换为字符串
       const getString = (val: any): string | undefined => {
         if (!val) return undefined;
         if (Buffer.isBuffer(val)) return val.toString('utf-8');
         return String(val);
       };
-      
+
       const type = getString(data.type);
       const name = getString(data.name);
       const status = getString(data.status);
-      
+
       // 只添加 online 状态的 agent 和 valid 的 human
       if (type === 'agent' && status === 'online') {
         accounts.set(staffId, {
@@ -70,12 +71,12 @@ async function loadAccountsFromRedis(redis: Redis, logger?: any): Promise<Map<st
         });
       }
     }
-    
+
     logger?.info?.(`[WeGirl] Loaded ${accounts.size} accounts into cache`);
   } catch (err: any) {
     logger?.error?.(`[WeGirl] Failed to load accounts from Redis:`, err.message);
   }
-  
+
   return accounts;
 }
 
@@ -119,7 +120,7 @@ const plugin = {
 
     // 初始化全局配置（从文件加载）
     initGlobalConfig();
-    
+
     // 使用全局配置
     const fullConfig = getGlobalConfig();
     const pluginConfig = getWeGirlPluginConfig();
@@ -432,7 +433,7 @@ const plugin = {
               );
 
               console.log(`[hr_manage:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
-              
+
               // 返回 null，deliver 不会发送任何消息
               return null;
             }
@@ -1328,12 +1329,12 @@ async function startGlobalStreamConsumer(
       } catch (err: any) {
         consecutiveErrors++;
         logger.error(`[WeGirl register] Global stream error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
-        
+
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
           logger.error('[WeGirl] Too many errors, stopping global consumer');
           break;
         }
-        
+
         await new Promise(resolve => setTimeout(resolve, Math.min(consecutiveErrors * 1000, 10000)));
       }
     }
@@ -1349,6 +1350,7 @@ async function startGlobalStreamConsumer(
 
 /**
  * 根据 target 分发消息到对应 agent
+ * 直接调用 wegirlSessionsSend 发送消息
  */
 async function dispatchMessageToAgent(
   data: any,
@@ -1357,22 +1359,44 @@ async function dispatchMessageToAgent(
   instanceId: string
 ): Promise<void> {
   const target = data.target;
-  
+
   if (!target) {
-    logger.warn('[WeGirl] Message missing target:', data);
+    logger.warn('[WeGirl register] Message missing target:', data);
     return;
   }
 
-  logger.info(`[WeGirl register] Message for ${target} will be consumed by target agent directly`);
-
-  // 只保存 routingId 到 Redis，不做转发
-  // 每个 agent 直接从全局 Stream 消费并过滤
   const routingId = data.routingId || `wegirl-${Date.now()}`;
+
   try {
+    // 保存 routingId 到 Redis
     const sessionRoutingKey = `${KEY_PREFIX}session:${target}:routingId`;
     await globalPublisher!.setex(sessionRoutingKey, 3600, routingId);
+
+    // 直接调用 wegirlSessionsSend 发送消息
+    const fullCfg = getGlobalConfig() || {};
+    await wegirlSessionsSend({
+      message: data.message,
+      source: data.source,
+      target: data.target,
+      chatType: data.chatType === 'group' ? 'group' : 'direct',
+      groupId: data.groupId,
+      routingId: routingId,
+      taskId: data.taskId,
+      stepId: data.stepId,
+      stepTotalAgents: data.stepTotalAgents,
+      msgType: data.msgType,
+      payload: data.payload,
+      metadata: data.metadata,
+      replyTo: data.replyTo,
+      fromType: 'outer',
+      cfg: fullCfg,
+      channel: 'wegirl',
+      log: logger,
+    });
+
+    logger.info(`[WeGirl register] Message sent to ${target} via wegirlSessionsSend`);
   } catch (err: any) {
-    logger.warn(`[WeGirl register] Failed to save routingId:`, err.message);
+    logger.error(`[WeGirl register] Failed to dispatch to ${target}:`, err.message);
   }
 }
 

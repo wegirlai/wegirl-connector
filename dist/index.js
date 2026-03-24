@@ -8,7 +8,8 @@ import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
-import { wegirlSend } from './core/index.js'; // 新核心模块
+import { wegirlSend } from './core/index.js';
+import { wegirlSessionsSend } from './core/sessions-send.js';
 import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig } from './config.js';
 let accountsCache = new Map();
 /**
@@ -1125,23 +1126,44 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
 }
 /**
  * 根据 target 分发消息到对应 agent
+ * 直接调用 wegirlSessionsSend 发送消息
  */
 async function dispatchMessageToAgent(data, context, logger, instanceId) {
     const target = data.target;
     if (!target) {
-        logger.warn('[WeGirl] Message missing target:', data);
+        logger.warn('[WeGirl register] Message missing target:', data);
         return;
     }
-    logger.info(`[WeGirl register] Message for ${target} will be consumed by target agent directly`);
-    // 只保存 routingId 到 Redis，不做转发
-    // 每个 agent 直接从全局 Stream 消费并过滤
     const routingId = data.routingId || `wegirl-${Date.now()}`;
     try {
+        // 保存 routingId 到 Redis
         const sessionRoutingKey = `${KEY_PREFIX}session:${target}:routingId`;
         await globalPublisher.setex(sessionRoutingKey, 3600, routingId);
+        // 直接调用 wegirlSessionsSend 发送消息
+        const fullCfg = getGlobalConfig() || {};
+        await wegirlSessionsSend({
+            message: data.message,
+            source: data.source,
+            target: data.target,
+            chatType: data.chatType === 'group' ? 'group' : 'direct',
+            groupId: data.groupId,
+            routingId: routingId,
+            taskId: data.taskId,
+            stepId: data.stepId,
+            stepTotalAgents: data.stepTotalAgents,
+            msgType: data.msgType,
+            payload: data.payload,
+            metadata: data.metadata,
+            replyTo: data.replyTo,
+            fromType: 'outer',
+            cfg: fullCfg,
+            channel: 'wegirl',
+            log: logger,
+        });
+        logger.info(`[WeGirl register] Message sent to ${target} via wegirlSessionsSend`);
     }
     catch (err) {
-        logger.warn(`[WeGirl register] Failed to save routingId:`, err.message);
+        logger.error(`[WeGirl register] Failed to dispatch to ${target}:`, err.message);
     }
 }
 /**

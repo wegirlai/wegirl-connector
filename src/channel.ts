@@ -142,92 +142,6 @@ export const wegirlPlugin = {
 
         setStatus({ running: true });
 
-        // 启动全局 Stream 消费者（每个 agent 独立消费组，只处理 target 匹配自己的消息）
-        const globalStreamKey = `${KEY_PREFIX}stream:global`;
-        const agentConsumerGroup = `wegirl-consumer-${id}`;  // 每个 agent 独立的消费者组
-        const agentConsumerName = `${id}-${instanceId}`;
-        
-        // 创建独立的消费者组（每个 agent 一个组）
-        try {
-          await publisher.xgroup('CREATE', globalStreamKey, agentConsumerGroup, '$', 'MKSTREAM');
-          log.info(`[WeGirl Channel]<${id}> Created consumer group: ${agentConsumerGroup}`);
-        } catch (err: any) {
-          if (!err.message?.includes('already exists')) {
-            log.error(`[WeGirl Channel]<${id}> Failed to create consumer group:`, err.message);
-          }
-        }
-        
-        // Agent 消费循环 - 从全局 Stream 读取，过滤 target
-        let agentRunning = true;
-        const consumeAgentStream = async () => {
-          while (agentRunning && !abortSignal.aborted) {
-            try {
-              const results = await publisher.xreadgroup(
-                'GROUP', agentConsumerGroup, agentConsumerName,
-                'COUNT', 1,
-                'BLOCK', 5000,
-                'STREAMS', globalStreamKey,
-                '>'
-              ) as any;
-              
-              if (!results || results.length === 0) continue;
-              
-              for (const [, messages] of results) {
-                for (const [messageId, fields] of messages) {
-                  try {
-                    const fieldMap: Record<string, string> = {};
-                    for (let i = 0; i < fields.length; i += 2) {
-                      fieldMap[fields[i]] = fields[i + 1];
-                    }
-                    
-                    if (fieldMap.data) {
-                      const data = JSON.parse(fieldMap.data);
-                      
-                      // 只处理 target 匹配当前 agent 的消息
-                      const target = data.target;
-                      if (target !== id && target !== `${id}:notifier`) {
-                        log.debug(`[WeGirl Channel]<${id}> Skipping message for ${target}`);
-                        await publisher.xack(globalStreamKey, agentConsumerGroup, messageId);
-                        continue;
-                      }
-                      
-                      log.info(`[WeGirl Channel]<${id}> Processing message for self:`, data.flowType);
-                      
-                      // 使用 runtime 处理消息
-                      if (runtime?.processMessage) {
-                        await runtime.processMessage({
-                          content: data.message,
-                          metadata: {
-                            source: data.source,
-                            routingId: data.routingId,
-                            flowType: data.flowType,
-                            ...data.metadata
-                          }
-                        });
-                      }
-                    }
-                    
-                    await publisher.xack(globalStreamKey, agentConsumerGroup, messageId);
-                  } catch (err: any) {
-                    log.error(`[WeGirl Channel]<${id}> Failed to process message:`, err.message);
-                    await publisher.xack(globalStreamKey, agentConsumerGroup, messageId);
-                  }
-                }
-              }
-            } catch (err: any) {
-              log.error(`[WeGirl Channel]<${id}> Stream error:`, err.message);
-              await new Promise(r => setTimeout(r, 5000));
-            }
-          }
-        };
-        
-        // 启动消费
-        consumeAgentStream().catch(err => {
-          log.error(`[WeGirl Channel]<${id}> Agent consumer crashed:`, err.message);
-        });
-        
-        log.info(`[WeGirl Channel]<${id}> Agent stream consumer started: ${globalStreamKey}`);
-
         // 等待终止信号
         await new Promise<void>((resolve) => {
           const onAbort = () => {
@@ -242,7 +156,6 @@ export const wegirlPlugin = {
         });
 
         // 清理
-        agentRunning = false;  // 停止 agent stream 消费者
         unregisterAgentReady(id, log);
         try {
           await publisher.del(`${KEY_PREFIX}agent:${id}:session`);
