@@ -85,6 +85,12 @@ let registry = null;
 let pendingQueue = null;
 let messageRouter = null;
 let wegirlTools = null;
+// 全局单例控制 - 确保只有一个 Stream 消费者
+let globalConsumerStarted = false;
+let globalStreamClient = null;
+let globalPublisher = null;
+// Agent 就绪状态映射 (accountId -> sessionKey)
+const agentReadyMap = new Map();
 const plugin = {
     id: 'wegirl',
     name: 'WeGirl',
@@ -200,6 +206,10 @@ const plugin = {
         // 启动初始化（异步，不阻塞注册）
         initRedis().catch((err) => {
             logger.error('[WeGirl] Redis initialization failed:', err.message);
+        });
+        // 启动全局 Stream 消费者（单例模式）
+        startGlobalStreamConsumer(context, pluginConfig, INSTANCE_ID).catch((err) => {
+            logger.error('[WeGirl] Global stream consumer failed:', err.message);
         });
         // 注册 Channel（同步）
         if (typeof context.registerChannel === 'function') {
@@ -1004,6 +1014,183 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
         action: 'none',
         message: '消息无需特殊处理'
     };
+}
+// ============ 全局 Stream 消费者（单例模式）============
+const KEY_PREFIX = 'wegirl:';
+const GLOBAL_STREAM_KEY = `${KEY_PREFIX}stream:global`;
+const GLOBAL_CONSUMER_GROUP = 'wegirl-global';
+/**
+ * 启动全局 Stream 消费者
+ * 只有一个消费者实例，根据 target 分发消息到不同 agent
+ */
+async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
+    if (globalConsumerStarted) {
+        context.logger.info('[WeGirl] Global stream consumer already started');
+        return;
+    }
+    globalConsumerStarted = true;
+    const logger = context.logger;
+    const config = pluginConfig || {};
+    const db = config.redisDb ?? 1;
+    const password = config.redisPassword;
+    const url = config.redisUrl || 'redis://localhost:6379';
+    const consumerName = `consumer-${instanceId}`;
+    logger.info(`[WeGirl] Starting global stream consumer (instance: ${instanceId})`);
+    const redisOptions = { db };
+    if (password)
+        redisOptions.password = password;
+    // 创建两个 Redis 连接：一个用于消费，一个用于发布
+    globalStreamClient = new Redis(url, redisOptions);
+    globalPublisher = new Redis(url, redisOptions);
+    // 等待连接就绪
+    await Promise.all([
+        new Promise((resolve, reject) => {
+            globalStreamClient.once('ready', resolve);
+            globalStreamClient.once('error', (err) => reject(err));
+            setTimeout(() => reject(new Error('streamClient connect timeout')), 10000);
+        }),
+        new Promise((resolve, reject) => {
+            globalPublisher.once('ready', resolve);
+            globalPublisher.once('error', (err) => reject(err));
+            setTimeout(() => reject(new Error('publisher connect timeout')), 10000);
+        })
+    ]);
+    logger.info('[WeGirl] Global stream Redis connections ready');
+    // 创建消费者组（如果不存在）
+    try {
+        await globalStreamClient.xgroup('CREATE', GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, '$', 'MKSTREAM');
+        logger.info(`[WeGirl] Created global consumer group: ${GLOBAL_CONSUMER_GROUP}`);
+    }
+    catch (err) {
+        if (!err.message?.includes('already exists')) {
+            logger.error(`[WeGirl] Failed to create global consumer group: ${err.message}`);
+            throw err;
+        }
+        logger.info(`[WeGirl] Global consumer group exists: ${GLOBAL_CONSUMER_GROUP}`);
+    }
+    // 消费循环
+    let running = true;
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 10;
+    const consumeStream = async () => {
+        while (running) {
+            try {
+                // XREADGROUP: 从全局消费者组读取消息
+                const results = await globalStreamClient.xreadgroup('GROUP', GLOBAL_CONSUMER_GROUP, consumerName, 'COUNT', 1, 'BLOCK', 5000, 'STREAMS', GLOBAL_STREAM_KEY, '>');
+                consecutiveErrors = 0;
+                if (!results || results.length === 0)
+                    continue;
+                // 解析并分发消息
+                for (const [, messages] of results) {
+                    for (const [messageId, fields] of messages) {
+                        try {
+                            const fieldMap = {};
+                            for (let i = 0; i < fields.length; i += 2) {
+                                fieldMap[fields[i]] = fields[i + 1];
+                            }
+                            if (fieldMap.data) {
+                                const data = JSON.parse(fieldMap.data);
+                                await dispatchMessageToAgent(data, context, logger, instanceId);
+                            }
+                            // ACK 消息
+                            await globalStreamClient.xack(GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, messageId);
+                        }
+                        catch (err) {
+                            logger.error(`[WeGirl] Failed to dispatch message ${messageId}:`, err.message);
+                            // 失败也要 ACK，避免无限重试
+                            try {
+                                await globalStreamClient.xack(GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, messageId);
+                            }
+                            catch { }
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                consecutiveErrors++;
+                logger.error(`[WeGirl] Global stream error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+                if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    logger.error('[WeGirl] Too many errors, stopping global consumer');
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, Math.min(consecutiveErrors * 1000, 10000)));
+            }
+        }
+    };
+    // 启动消费（不阻塞）
+    consumeStream().catch(err => {
+        logger.error('[WeGirl] Global consumer crashed:', err.message);
+    });
+    logger.info('[WeGirl] Global stream consumer started');
+}
+/**
+ * 根据 target 分发消息到对应 agent
+ */
+async function dispatchMessageToAgent(data, context, logger, instanceId) {
+    const target = data.target;
+    if (!target) {
+        logger.warn('[WeGirl] Message missing target:', data);
+        return;
+    }
+    logger.info(`[WeGirl] Message for ${target} will be consumed by target agent directly`);
+    // 只保存 routingId 到 Redis，不做转发
+    // 每个 agent 直接从全局 Stream 消费并过滤
+    const routingId = data.routingId || `wegirl-${Date.now()}`;
+    try {
+        const sessionRoutingKey = `${KEY_PREFIX}session:${target}:routingId`;
+        await globalPublisher.setex(sessionRoutingKey, 3600, routingId);
+    }
+    catch (err) {
+        logger.warn(`[WeGirl] Failed to save routingId:`, err.message);
+    }
+}
+/**
+ * 查找或创建 agent 的 session
+ */
+async function findOrCreateAgentSession(agentId, runtime, logger) {
+    try {
+        // 1. 尝试从 Redis 获取 agent 的 session key
+        const sessionKey = await globalPublisher.get(`${KEY_PREFIX}agent:${agentId}:session`);
+        if (sessionKey) {
+            // 验证 session 是否仍然有效
+            const session = await runtime.getSession?.(sessionKey);
+            if (session) {
+                return sessionKey;
+            }
+        }
+        // 2. 如果 agent 有绑定的 account，创建新 session
+        // 这需要通过 runtime 创建新 session
+        // 注意：这里简化处理，实际可能需要更复杂的逻辑
+        logger.warn(`[WeGirl] Agent ${agentId} has no active session, message will be queued`);
+        return null;
+    }
+    catch (err) {
+        logger.error(`[WeGirl] Error finding session for ${agentId}:`, err.message);
+        return null;
+    }
+}
+// ============ Agent Session 管理 ============
+/**
+ * 注册 agent 就绪状态
+ * 由 channel.ts 的 startAccount 调用
+ */
+export function registerAgentReady(accountId, sessionKey, logger) {
+    agentReadyMap.set(accountId, sessionKey);
+    logger?.info?.(`[WeGirl] Agent ${accountId} registered with session ${sessionKey}`);
+}
+/**
+ * 注销 agent 就绪状态
+ * 由 channel.ts 的 stopAccount 调用
+ */
+export function unregisterAgentReady(accountId, logger) {
+    agentReadyMap.delete(accountId);
+    logger?.info?.(`[WeGirl] Agent ${accountId} unregistered`);
+}
+/**
+ * 获取 agent 的 session key
+ */
+export function getAgentSessionKey(accountId) {
+    return agentReadyMap.get(accountId);
 }
 export default plugin;
 // 导出 accounts 相关函数供其他模块使用

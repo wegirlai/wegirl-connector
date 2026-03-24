@@ -106,15 +106,15 @@ export function registerEventHandlers(ctx: EventHandlerContext): void {
     const toolName = event?.toolName || 'unknown';
     const params = event?.params || {};
 
-    // 提取文件路径（针对 read/edit/write 工具）
-    let target = 'N/A';
-    if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
-      target = params.file_path || params.path || params.filePath || params.newText || 'N/A';
+    // 批量调用时 params 可能是数组
+    if (Array.isArray(params)) {
+      const targets = params.map(p => extractTarget(toolName, p)).join(', ');
+      logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (batch: ${params.length} items, targets: ${targets})`);
     } else {
-      target = params.command || 'N/A';
+      const target = extractTarget(toolName, params);
+      logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (target: ${target})`);
     }
 
-    logger.info(`[WeGirl] Event: before_tool_call - ${toolName} (target: ${target})`);
     persistEvent('before_tool_call', event, ctx);
   });
 
@@ -124,19 +124,46 @@ export function registerEventHandlers(ctx: EventHandlerContext): void {
     const params = event?.params || {};
     const duration = event?.durationMs || 'unknown';
 
-    // 提取文件路径（针对 read/edit/write 工具）
-    let target = 'N/A';
-    if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
-      target = params.file_path || params.path || params.filePath || params.newText || 'N/A';
+    // 批量调用时 params 可能是数组
+    if (Array.isArray(params)) {
+      const targets = params.map(p => extractTarget(toolName, p)).join(', ');
+      logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (batch: ${params.length} items, targets: ${targets}, ${duration}ms)`);
     } else {
-      target = params.command || 'N/A';
+      const target = extractTarget(toolName, params);
+      logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (target: ${target}, ${duration}ms)`);
     }
 
-    logger.info(`[WeGirl] Event: after_tool_call - ${toolName} (target: ${target}, ${duration}ms)`);
     persistEvent('after_tool_call', event, ctx);
   });
 
   logger.info('[WeGirl] Event handlers registered (10 events)');
+}
+
+/**
+ * 从工具参数中提取目标（文件路径或命令）
+ * 支持多种可能的字段名
+ */
+function extractTarget(toolName: string, params: any): string {
+  if (!params || typeof params !== 'object') return 'N/A';
+  
+  if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
+    // read/write/edit 工具：提取文件路径
+    const path = params?.file_path || params?.path || params?.filePath || 
+                 params?.file_path || params?.filePath || params?.filepath ||
+                 params?.target || params?.source;
+    return path || `params:[${Object.keys(params).join(',')}]`;
+  }
+  
+  // 其他工具：提取关键标识
+  if (params?.command) return `cmd:${params.command.substring(0, 30)}`;
+  if (params?.url) return `url:${params.url.substring(0, 30)}`;
+  if (params?.query) return `query:${params.query.substring(0, 30)}`;
+  
+  // 显示所有参数键
+  const keys = Object.keys(params);
+  if (keys.length === 0) return 'empty';
+  if (keys.length <= 3) return `{${keys.join(',')}}`;
+  return `{${keys.slice(0, 3).join(',')}...}`;
 }
 
 /**
