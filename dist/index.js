@@ -21,7 +21,7 @@ async function loadAccountsFromRedis(redis, logger) {
     try {
         // 获取所有 staff keys
         const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
-        logger?.info?.(`[WeGirl] Loading accounts from Redis: found ${keys.length} staff keys`);
+        logger?.info?.(`[WeGirl register] Loading accounts from Redis: found ${keys.length} staff keys`);
         for (const key of keys) {
             const staffId = key.toString().replace(`${KEY_PREFIX}staff:`, '');
             // 跳过特殊 keys
@@ -60,10 +60,10 @@ async function loadAccountsFromRedis(redis, logger) {
                 });
             }
         }
-        logger?.info?.(`[WeGirl] Loaded ${accounts.size} accounts into cache`);
+        logger?.info?.(`[WeGirl register] Loaded ${accounts.size} accounts into cache`);
     }
     catch (err) {
-        logger?.error?.(`[WeGirl] Failed to load accounts from Redis:`, err.message);
+        logger?.error?.(`[WeGirl register] Failed to load accounts from Redis:`, err.message);
     }
     return accounts;
 }
@@ -115,14 +115,14 @@ const plugin = {
         // 保存 PluginRuntime
         if (context.runtime) {
             setWeGirlRuntime(context.runtime);
-            logger.info('[WeGirl] Runtime saved to global');
+            logger.info('[WeGirl register] Runtime saved to global');
         }
         else {
-            logger.error('[WeGirl] No runtime in context!');
+            logger.error('[WeGirl register] No runtime in context!');
         }
         // 保存 PluginConfig（用于兼容性）
         setWeGirlConfig(pluginConfig);
-        logger.info('[WeGirl] PluginConfig saved to global');
+        logger.info('[WeGirl register] PluginConfig saved to global');
         logger.info(`[WeGirl register] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
         // 初始化 Redis 连接
         async function initRedis() {
@@ -156,11 +156,11 @@ const plugin = {
                 // 等待连接就绪
                 await new Promise((resolve, reject) => {
                     redisClient.once('ready', () => {
-                        logger.info('[WeGirl] Redis 连接成功');
+                        logger.info('[WeGirl register] Redis 连接成功');
                         resolve();
                     });
                     redisClient.once('error', (err) => {
-                        logger.error('[WeGirl] Redis 连接失败:', err.message);
+                        logger.error('[WeGirl register] Redis 连接失败:', err.message);
                         reject(err);
                     });
                     // 超时处理
@@ -197,14 +197,14 @@ const plugin = {
                     wegirlTools = new WeGirlTools(redisClient, INSTANCE_ID, logger);
                     // 启动跨实例消息监听
                     await messageRouter.startListening();
-                    logger.info('[WeGirl] Cross-instance message listener started');
+                    logger.info('[WeGirl register] Cross-instance message listener started');
                     // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent
                     try {
                         const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
                         logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
                     }
                     catch (syncErr) {
-                        logger.error('[WeGirl] Agent sync failed:', syncErr.message);
+                        logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
                     }
                 }
             })();
@@ -212,16 +212,16 @@ const plugin = {
         }
         // 启动初始化（异步，不阻塞注册）
         initRedis().catch((err) => {
-            logger.error('[WeGirl] Redis initialization failed:', err.message);
+            logger.error('[WeGirl register] Redis initialization failed:', err.message);
         });
         // 启动全局 Stream 消费者（单例模式）
         startGlobalStreamConsumer(context, pluginConfig, INSTANCE_ID).catch((err) => {
-            logger.error('[WeGirl] Global stream consumer failed:', err.message);
+            logger.error('[WeGirl register] Global stream consumer failed:', err.message);
         });
         // 注册 Channel（同步）
         if (typeof context.registerChannel === 'function') {
             context.registerChannel(wegirlPlugin);
-            logger.info('[WeGirl] Channel registered');
+            logger.info('[WeGirl register] Channel registered');
         }
         // 注册 Tools（异步初始化后可用）
         if (typeof context.registerTool === 'function') {
@@ -416,10 +416,10 @@ const plugin = {
                     };
                 }
             });
-            logger.info('[WeGirl] Tools registered: wegirl_send, hr_manage');
+            logger.info('[WeGirl register] Tools registered: wegirl_send, hr_manage');
         }
         else {
-            logger.warn('[WeGirl] registerTool not available');
+            logger.warn('[WeGirl register] registerTool not available');
         }
         // TODO: default 消息处理通过 Stream 消费端实现
         // 当收到 target 为 default:{instance} 的消息时，
@@ -442,11 +442,11 @@ const plugin = {
                 handler: async (req, res) => {
                     try {
                         const data = JSON.parse(req.body);
-                        logger.info('[WeGirl] Webhook received:', JSON.stringify(data));
+                        logger.info('[WeGirl register] Webhook received:', JSON.stringify(data));
                         res.status(200).json({ success: true });
                     }
                     catch (err) {
-                        logger.error('[WeGirl] Webhook error:', err.message);
+                        logger.error('[WeGirl register] Webhook error:', err.message);
                         res.status(500).json({ error: err.message });
                     }
                 }
@@ -589,7 +589,7 @@ const plugin = {
                         res.status(200).json(metrics);
                     }
                     catch (err) {
-                        logger.error('[WeGirl] Metrics error:', err.message);
+                        logger.error('[WeGirl register] Metrics error:', err.message);
                         res.status(500).json({ error: err.message });
                     }
                 }
@@ -627,7 +627,7 @@ const plugin = {
                 }
             });
         }
-        logger.info('[WeGirl] Plugin registered successfully');
+        logger.info('[WeGirl register] Plugin registered successfully');
     },
 };
 // ============ HR Manage Tool Handlers ============
@@ -1032,7 +1032,7 @@ const GLOBAL_CONSUMER_GROUP = 'wegirl-global';
  */
 async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
     if (globalConsumerStarted) {
-        context.logger.info('[WeGirl] Global stream consumer already started');
+        context.logger.info('[WeGirl register] Global stream consumer already started');
         return;
     }
     globalConsumerStarted = true;
@@ -1062,7 +1062,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
             setTimeout(() => reject(new Error('publisher connect timeout')), 10000);
         })
     ]);
-    logger.info('[WeGirl] Global stream Redis connections ready');
+    logger.info('[WeGirl register] Global stream Redis connections ready');
     // 创建消费者组（如果不存在）
     try {
         await globalStreamClient.xgroup('CREATE', GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, '$', 'MKSTREAM');
@@ -1117,7 +1117,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
                 consecutiveErrors++;
                 logger.error(`[WeGirl register] Global stream error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-                    logger.error('[WeGirl] Too many errors, stopping global consumer');
+                    logger.error('[WeGirl register] Too many errors, stopping global consumer');
                     break;
                 }
                 await new Promise(resolve => setTimeout(resolve, Math.min(consecutiveErrors * 1000, 10000)));
@@ -1126,9 +1126,9 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
     };
     // 启动消费（不阻塞）
     consumeStream().catch(err => {
-        logger.error('[WeGirl] Global consumer crashed:', err.message);
+        logger.error('[WeGirl register] Global consumer crashed:', err.message);
     });
-    logger.info('[WeGirl] Global stream consumer started');
+    logger.info('[WeGirl register] Global stream consumer started');
 }
 /**
  * 根据 target 分发消息到对应 agent
@@ -1204,7 +1204,7 @@ async function findOrCreateAgentSession(agentId, runtime, logger) {
  */
 export function registerAgentReady(accountId, sessionKey, logger) {
     agentReadyMap.set(accountId, sessionKey);
-    logger?.info?.(`[WeGirl] Agent ${accountId} registered with session ${sessionKey}`);
+    logger?.info?.(`[WeGirl register] Agent ${accountId} registered with session ${sessionKey}`);
 }
 /**
  * 注销 agent 就绪状态
@@ -1212,7 +1212,7 @@ export function registerAgentReady(accountId, sessionKey, logger) {
  */
 export function unregisterAgentReady(accountId, logger) {
     agentReadyMap.delete(accountId);
-    logger?.info?.(`[WeGirl] Agent ${accountId} unregistered`);
+    logger?.info?.(`[WeGirl register] Agent ${accountId} unregistered`);
 }
 /**
  * 获取 agent 的 session key
