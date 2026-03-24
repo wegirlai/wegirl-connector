@@ -104,7 +104,7 @@ const plugin = {
         const pluginConfig = getWeGirlPluginConfig();
         // 实例ID（从配置读取）
         const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
-        logger.info(`[WeGirl] Plugin registering... (Instance: ${INSTANCE_ID})`);
+        logger.info(`[WeGirl register] Plugin registering... (Instance: ${INSTANCE_ID})`);
         // 保存 PluginRuntime
         if (context.runtime) {
             setWeGirlRuntime(context.runtime);
@@ -116,7 +116,7 @@ const plugin = {
         // 保存 PluginConfig（用于兼容性）
         setWeGirlConfig(pluginConfig);
         logger.info('[WeGirl] PluginConfig saved to global');
-        logger.info(`[WeGirl] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
+        logger.info(`[WeGirl register] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
         // 初始化 Redis 连接
         async function initRedis() {
             if (redisConnectPromise)
@@ -127,16 +127,16 @@ const plugin = {
                 const db = config.redisDb ?? 1;
                 const password = config.redisPassword;
                 const url = config.redisUrl || 'redis://localhost:6379';
-                logger.info(`[WeGirl] Redis URL: ${url.replace(/:\/\/.*@/, '://***@')}, db: ${db}`);
+                logger.info(`[WeGirl register] Redis URL: ${url.replace(/:\/\/.*@/, '://***@')}, db: ${db}`);
                 const redisOptions = {
                     db,
                     retryStrategy: (times) => {
                         if (times > 10) {
-                            logger.error(`[WeGirl] Redis 重试次数(${times})超过限制`);
+                            logger.error(`[WeGirl register] Redis 重试次数(${times})超过限制`);
                             return null; // 停止重连
                         }
                         const delay = Math.min(Math.pow(2, times) * 50, 3000);
-                        logger.warn(`[WeGirl] Redis 第 ${times} 次重连，${delay}ms 后尝试`);
+                        logger.warn(`[WeGirl register] Redis 第 ${times} 次重连，${delay}ms 后尝试`);
                         return delay;
                     },
                     connectTimeout: 10000,
@@ -172,14 +172,14 @@ const plugin = {
                         capabilities: config.capabilities || [],
                         maxConcurrent: config.maxConcurrent || 3,
                     });
-                    logger.info(`[WeGirl] Agent ${agentId} registered with heartbeat`);
+                    logger.info(`[WeGirl register] Agent ${agentId} registered with heartbeat`);
                     // 启动心跳定时器
                     setInterval(async () => {
                         try {
                             await registry.heartbeat(agentId);
                         }
                         catch (err) {
-                            logger.error(`[WeGirl] Heartbeat error:`, err.message);
+                            logger.error(`[WeGirl register] Heartbeat error:`, err.message);
                         }
                     }, 30000);
                 }
@@ -194,7 +194,7 @@ const plugin = {
                     // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent
                     try {
                         const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
-                        logger.info(`[WeGirl] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
+                        logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
                     }
                     catch (syncErr) {
                         logger.error('[WeGirl] Agent sync failed:', syncErr.message);
@@ -1035,7 +1035,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
     const password = config.redisPassword;
     const url = config.redisUrl || 'redis://localhost:6379';
     const consumerName = `consumer-${instanceId}`;
-    logger.info(`[WeGirl] Starting global stream consumer (instance: ${instanceId})`);
+    logger.info(`[WeGirl register] Starting global stream consumer (instance: ${instanceId})`);
     const redisOptions = { db };
     if (password)
         redisOptions.password = password;
@@ -1059,14 +1059,14 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
     // 创建消费者组（如果不存在）
     try {
         await globalStreamClient.xgroup('CREATE', GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, '$', 'MKSTREAM');
-        logger.info(`[WeGirl] Created global consumer group: ${GLOBAL_CONSUMER_GROUP}`);
+        logger.info(`[WeGirl register] Created global consumer group: ${GLOBAL_CONSUMER_GROUP}`);
     }
     catch (err) {
         if (!err.message?.includes('already exists')) {
-            logger.error(`[WeGirl] Failed to create global consumer group: ${err.message}`);
+            logger.error(`[WeGirl register] Failed to create global consumer group: ${err.message}`);
             throw err;
         }
-        logger.info(`[WeGirl] Global consumer group exists: ${GLOBAL_CONSUMER_GROUP}`);
+        logger.info(`[WeGirl register] Global consumer group exists: ${GLOBAL_CONSUMER_GROUP}`);
     }
     // 消费循环
     let running = true;
@@ -1096,7 +1096,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
                             await globalStreamClient.xack(GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, messageId);
                         }
                         catch (err) {
-                            logger.error(`[WeGirl] Failed to dispatch message ${messageId}:`, err.message);
+                            logger.error(`[WeGirl register] Failed to dispatch message ${messageId}:`, err.message);
                             // 失败也要 ACK，避免无限重试
                             try {
                                 await globalStreamClient.xack(GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, messageId);
@@ -1108,7 +1108,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
             }
             catch (err) {
                 consecutiveErrors++;
-                logger.error(`[WeGirl] Global stream error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
+                logger.error(`[WeGirl register] Global stream error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}):`, err.message);
                 if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
                     logger.error('[WeGirl] Too many errors, stopping global consumer');
                     break;
@@ -1132,7 +1132,7 @@ async function dispatchMessageToAgent(data, context, logger, instanceId) {
         logger.warn('[WeGirl] Message missing target:', data);
         return;
     }
-    logger.info(`[WeGirl] Message for ${target} will be consumed by target agent directly`);
+    logger.info(`[WeGirl register] Message for ${target} will be consumed by target agent directly`);
     // 只保存 routingId 到 Redis，不做转发
     // 每个 agent 直接从全局 Stream 消费并过滤
     const routingId = data.routingId || `wegirl-${Date.now()}`;
@@ -1141,7 +1141,7 @@ async function dispatchMessageToAgent(data, context, logger, instanceId) {
         await globalPublisher.setex(sessionRoutingKey, 3600, routingId);
     }
     catch (err) {
-        logger.warn(`[WeGirl] Failed to save routingId:`, err.message);
+        logger.warn(`[WeGirl register] Failed to save routingId:`, err.message);
     }
 }
 /**
@@ -1161,11 +1161,11 @@ async function findOrCreateAgentSession(agentId, runtime, logger) {
         // 2. 如果 agent 有绑定的 account，创建新 session
         // 这需要通过 runtime 创建新 session
         // 注意：这里简化处理，实际可能需要更复杂的逻辑
-        logger.warn(`[WeGirl] Agent ${agentId} has no active session, message will be queued`);
+        logger.warn(`[WeGirl register] Agent ${agentId} has no active session, message will be queued`);
         return null;
     }
     catch (err) {
-        logger.error(`[WeGirl] Error finding session for ${agentId}:`, err.message);
+        logger.error(`[WeGirl register] Error finding session for ${agentId}:`, err.message);
         return null;
     }
 }
