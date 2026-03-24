@@ -1,8 +1,6 @@
-// src/channel.ts - Channel Plugin 定义（保留心跳，无 outbound）
+// src/channel.ts - Channel Plugin 定义（最小化版本）
 
-import Redis from 'ioredis';
 import { getWeGirlPluginConfig } from './config.js';
-import { Registry } from './registry.js';
 
 const wegirlPlugin = {
   plugin: {
@@ -52,85 +50,8 @@ const wegirlPlugin = {
       })
     },
 
-    // 无 outbound - 单一渠道，不发送消息到其他渠道
-
-    gateway: {
-      startAccount: async (ctx: any) => {
-        const { cfg, accountId, abortSignal, log, setStatus } = ctx;
-        const id = accountId || 'default';
-        
-        // 直接使用传入的 cfg
-        const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
-        const instanceId = pluginCfg?.instanceId || 'instance-local';
-
-        log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
-
-        // 统一从 openclaw.json 的 plugins.wegirl.config 读取 Redis 配置
-        const redisUrl = pluginCfg?.redisUrl || 'redis://localhost:6379';
-        const password = pluginCfg?.redisPassword;
-        const db = pluginCfg?.redisDb ?? 1;
-
-        const redisOptions: any = { db };
-        if (password) redisOptions.password = password;
-
-        // 创建 Redis 连接（用于心跳）
-        const redis = new Redis(redisUrl, redisOptions);
-        redis.on('error', (err: Error) => log.error('[WeGirl] Redis error:', err.message));
-
-        // 等待连接就绪
-        await new Promise<void>((resolve, reject) => {
-          redis.once('ready', resolve);
-          redis.once('error', (err) => reject(new Error(`Redis: ${err.message}`)));
-          setTimeout(() => reject(new Error('Redis connect timeout')), 10000);
-        });
-
-        log.info('[WeGirl Channel] Redis connected');
-
-        setStatus({ running: true });
-
-        // 注册 Agent 心跳（每个 agent 独立）
-        const registry = new Registry(redis, instanceId, log);
-        await registry.register({
-          staffId: id,
-          type: 'agent',
-          name: id,
-          capabilities: [],
-          maxConcurrent: 3,
-        });
-        log.info(`[WeGirl Channel]<${id}> Agent heartbeat registered`);
-
-        // 启动心跳定时器
-        const heartbeatInterval = setInterval(async () => {
-          try {
-            await registry.heartbeat(id);
-          } catch (err: any) {
-            log.error(`[WeGirl Channel]<${id}> Heartbeat error:`, err.message);
-          }
-        }, 30000);
-
-        // 等待终止信号
-        await new Promise<void>((resolve) => {
-          const onAbort = () => {
-            log.info(`[WeGirl Channel]<${id}> Abort signal received, stopping...`);
-            resolve();
-          };
-          if (abortSignal.aborted) {
-            onAbort();
-          } else {
-            abortSignal.addEventListener('abort', onAbort, { once: true });
-          }
-        });
-
-        // 清理
-        clearInterval(heartbeatInterval);
-        await registry.unregisterAgent(id);
-        try {
-          await redis.quit();
-        } catch { /* ignore */ }
-        setStatus({ running: false });
-        log.info(`[WeGirl Channel]<${id}> Stopped`);
-      }
-    }
+    // 无 outbound - 单一渠道
+    // 无 gateway.startAccount - 消息处理在 register 中全局处理
   }
 };
 
