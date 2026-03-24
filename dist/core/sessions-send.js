@@ -228,51 +228,6 @@ export async function wegirlSessionsSend(options) {
             Model: 'kimi-coding/k2p5',
         });
         log?.info?.(`${logPrefix} dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
-        // 等待 session 就绪，避免竞态条件
-        // OpenClaw 的 session 是异步初始化的，第一次调用时可能尚未就绪
-        // 策略：优先使用 ensureSessionLoaded API，否则使用指数退避重试
-        let sessionReady = false;
-        // 获取 session 管理器（如果存在）
-        const sessionManager = runtime.channel.session;
-        // 尝试使用 ensureSessionLoaded API
-        if (sessionManager?.ensureSessionLoaded) {
-            try {
-                log?.debug?.(`${logPrefix} Waiting for session via ensureSessionLoaded...`);
-                await sessionManager.ensureSessionLoaded(sessionKey);
-                sessionReady = true;
-                log?.debug?.(`${logPrefix} Session is ready`);
-            }
-            catch (err) {
-                log?.warn?.(`${logPrefix} ensureSessionLoaded failed: ${err.message}`);
-            }
-        }
-        // 如果 ensureSessionLoaded 不可用或失败，尝试 getSessionState
-        if (!sessionReady && sessionManager?.getSessionState) {
-            let retries = 0;
-            const maxRetries = 5;
-            while (retries < maxRetries) {
-                try {
-                    const sessionState = await sessionManager.getSessionState(sessionKey);
-                    if (sessionState && sessionState.ready !== false) {
-                        sessionReady = true;
-                        log?.debug?.(`${logPrefix} Session ready via getSessionState after ${retries} retries`);
-                        break;
-                    }
-                }
-                catch { /* ignore */ }
-                retries++;
-                if (retries < maxRetries) {
-                    const delay = Math.min(100 * Math.pow(2, retries), 1000);
-                    log?.debug?.(`${logPrefix} Session not ready, waiting ${delay}ms...`);
-                    await new Promise(r => setTimeout(r, delay));
-                }
-            }
-        }
-        // 兜底：如果没有可用的 session API，强制等待一小段时间
-        if (!sessionReady) {
-            log?.debug?.(`${logPrefix} No session API available, using fixed delay (150ms)`);
-            await new Promise(r => setTimeout(r, 150));
-        }
         // 创建 dispatcher，处理 Agent 回复
         // 当 channel="wegirl" 时，通过 outbound 发送；其他情况交由 Gateway 自动路由
         const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
