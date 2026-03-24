@@ -189,17 +189,11 @@ export async function wegirlSessionsSend(options) {
         }
         // 3. 构建 envelope
         const body = runtime.channel.reply.formatAgentEnvelope({
-            channel: 'wegirl',
+            channel: channel,
             from: source,
             timestamp: new Date(),
             body: message,
         });
-        // 确保 cfg 包含必要的账户信息
-        const fullCfg = {
-            ...cfg,
-            // 确保 accounts 存在
-            accounts: cfg?.accounts || {},
-        };
         // 构建 inbound context
         // Provider/Surface: wegirl（当前渠道）
         // OriginatingChannel/OriginatingTo: 目标渠道，Gateway 会自动路由回复到该渠道
@@ -212,7 +206,7 @@ export async function wegirlSessionsSend(options) {
             RawBody: message,
             CommandBody: message,
             From: source,
-            To: chatId,
+            To: target,
             SessionKey: sessionKey,
             AccountId: target,
             Provider: 'wegirl',
@@ -228,12 +222,57 @@ export async function wegirlSessionsSend(options) {
             // 关键：设置 OriginatingChannel 和 OriginatingTo，让回复能路由回发送者
             // 优先使用 replyTo 参数（从 V2 消息传入），其次使用 metadata 中的 originatingTo
             // 注意：OriginatingTo 必须是字符串，replyTo 是数组，取第一个元素
-            OriginatingChannel: originalMetadata?.originatingChannel || channel,
+            OriginatingChannel: channel,
             OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
             // 强制指定模型，避免使用默认的 anthropic
             Model: 'kimi-coding/k2p5',
         });
         log?.info?.(`${logPrefix} dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
+        // 等待 session 就绪，避免竞态条件
+        // OpenClaw 的 session 是异步初始化的，第一次调用时可能尚未就绪
+        // 策略：优先使用 ensureSessionLoaded API，否则使用指数退避重试
+        let sessionReady = false;
+        // 获取 session 管理器（如果存在）
+        const sessionManager = runtime.channel.session;
+        // 尝试使用 ensureSessionLoaded API
+        if (sessionManager?.ensureSessionLoaded) {
+            try {
+                log?.debug?.(`${logPrefix} Waiting for session via ensureSessionLoaded...`);
+                await sessionManager.ensureSessionLoaded(sessionKey);
+                sessionReady = true;
+                log?.debug?.(`${logPrefix} Session is ready`);
+            }
+            catch (err) {
+                log?.warn?.(`${logPrefix} ensureSessionLoaded failed: ${err.message}`);
+            }
+        }
+        // 如果 ensureSessionLoaded 不可用或失败，尝试 getSessionState
+        if (!sessionReady && sessionManager?.getSessionState) {
+            let retries = 0;
+            const maxRetries = 5;
+            while (retries < maxRetries) {
+                try {
+                    const sessionState = await sessionManager.getSessionState(sessionKey);
+                    if (sessionState && sessionState.ready !== false) {
+                        sessionReady = true;
+                        log?.debug?.(`${logPrefix} Session ready via getSessionState after ${retries} retries`);
+                        break;
+                    }
+                }
+                catch { /* ignore */ }
+                retries++;
+                if (retries < maxRetries) {
+                    const delay = Math.min(100 * Math.pow(2, retries), 1000);
+                    log?.debug?.(`${logPrefix} Session not ready, waiting ${delay}ms...`);
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+        }
+        // 兜底：如果没有可用的 session API，强制等待一小段时间
+        if (!sessionReady) {
+            log?.debug?.(`${logPrefix} No session API available, using fixed delay (150ms)`);
+            await new Promise(r => setTimeout(r, 150));
+        }
         // 创建 dispatcher，处理 Agent 回复
         // 当 channel="wegirl" 时，通过 outbound 发送；其他情况交由 Gateway 自动路由
         const { dispatcher, replyOptions: baseReplyOptions, markDispatchIdle } = runtime.channel.reply.createReplyDispatcherWithTyping({
@@ -407,7 +446,7 @@ export async function wegirlSessionsSend(options) {
         // 调用 dispatchReplyFromConfig 发送消息给 Agent
         const result = await runtime.channel.reply.dispatchReplyFromConfig({
             ctx: inboundCtx,
-            cfg: fullCfg,
+            cfg: cfg,
             dispatcher,
             replyOptions,
         });
