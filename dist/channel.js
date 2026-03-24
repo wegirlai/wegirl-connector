@@ -1,7 +1,7 @@
 // src/channel.ts - Channel Plugin 定义
 import Redis from 'ioredis';
 import { setWeGirlPublisher, getWeGirlPublisher } from './runtime.js';
-import { getGlobalConfig, getWeGirlPluginConfig } from './config.js';
+import { getWeGirlPluginConfig } from './config.js';
 import { registerAgentReady, unregisterAgentReady } from './index.js';
 const KEY_PREFIX = 'wegirl:';
 export const wegirlPlugin = {
@@ -83,11 +83,10 @@ export const wegirlPlugin = {
         },
         gateway: {
             startAccount: async (ctx) => {
-                const { accountId, abortSignal, log, setStatus, runtime } = ctx;
+                const { cfg, accountId, abortSignal, log, setStatus, runtime } = ctx;
                 const id = accountId || 'default';
-                // 使用全局配置（已由 register 设置）
-                const fullCfg = getGlobalConfig() || {};
-                const pluginCfg = fullCfg?.plugins?.entries?.wegirl?.config || {};
+                // 直接使用传入的 cfg
+                const pluginCfg = cfg?.plugins?.entries?.wegirl?.config || {};
                 const instanceId = pluginCfg?.instanceId || 'instance-local';
                 log.info(`[WeGirl Channel]<${id}> Starting (instance: ${instanceId})`);
                 // 统一从 openclaw.json 的 plugins.wegirl.config 读取 Redis 配置
