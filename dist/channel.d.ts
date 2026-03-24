@@ -1,4 +1,4 @@
-export declare const wegirlPlugin: {
+declare const wegirlPlugin: {
     plugin: {
         id: string;
         meta: {
@@ -33,19 +33,7 @@ export declare const wegirlPlugin: {
                 linked: boolean;
             };
         };
-        outbound: {
-            deliveryMode: "direct";
-            sendText: ({ text, to, from, accountId, sessionId }: any, log?: any) => Promise<{
-                ok: boolean;
-                error?: undefined;
-            } | {
-                ok: boolean;
-                error: any;
-            }>;
-        };
-        gateway: {
-            startAccount: (ctx: any) => Promise<void>;
-        };
     };
 };
+export { wegirlPlugin };
 //# sourceMappingURL=channel.d.ts.map
