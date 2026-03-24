@@ -33,6 +33,9 @@ declare const wegirlPlugin: {
                 linked: boolean;
             };
         };
+        gateway: {
+            startAccount: (ctx: any) => Promise<void>;
+        };
     };
 };
 export { wegirlPlugin };
