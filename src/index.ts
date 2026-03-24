@@ -11,7 +11,7 @@ import { executeCreateAgent } from './hr-manage-core.js';
 import { checkIsAgent, handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, loadOpenClawConfig } from './config.js';
+import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, loadOpenClawConfig } from './config.js';
 import type { MessageEnvelope } from './protocol.js';
 import type {
   PluginConfig,
@@ -118,7 +118,14 @@ const plugin = {
   register(context: PluginContext): void {
     const logger = context.logger;
 
-    // 初始化全局配置（从文件加载）
+    // 从 context 获取配置（如果 OpenClaw 传入）
+    const ctxCfg = (context as any).cfg || (context as any).config;
+    if (ctxCfg) {
+      setGlobalConfig(ctxCfg);
+      logger.info('[WeGirl register] Global config set from context.cfg');
+    }
+
+    // 初始化全局配置（从文件加载，如果上面没有设置）
     initGlobalConfig();
 
     // 使用全局配置

@@ -10,7 +10,7 @@ import { registerEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig } from './config.js';
+import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig } from './config.js';
 let accountsCache = new Map();
 /**
  * 从 Redis 加载所有 agents 和 humans 到 accounts
@@ -98,7 +98,13 @@ const plugin = {
     description: 'WeGirl Redis connector for OpenClaw - Multi-Agent orchestration hub',
     register(context) {
         const logger = context.logger;
-        // 初始化全局配置（从文件加载）
+        // 从 context 获取配置（如果 OpenClaw 传入）
+        const ctxCfg = context.cfg || context.config;
+        if (ctxCfg) {
+            setGlobalConfig(ctxCfg);
+            logger.info('[WeGirl register] Global config set from context.cfg');
+        }
+        // 初始化全局配置（从文件加载，如果上面没有设置）
         initGlobalConfig();
         // 使用全局配置
         const fullConfig = getGlobalConfig();
