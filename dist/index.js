@@ -184,24 +184,21 @@ const plugin = {
                             const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
                             hasSyncedAgents = true;
                             logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
-                            // 启动全局心跳刷新（每 30 秒刷新所有本地 agent 的心跳）
+                            // 注册到 Registry（只做初始注册，不启动定时心跳）
                             registry = new Registry(redisClient, INSTANCE_ID, logger);
-                            setInterval(async () => {
-                                try {
-                                    // 获取所有本地 agent 并刷新心跳
-                                    const localAgents = await getLocalAgents(logger);
-                                    for (const agent of localAgents) {
-                                        if (agent?.id) {
-                                            await registry.heartbeat(agent.id);
-                                        }
-                                    }
-                                    logger.debug(`[WeGirl register] Heartbeat refreshed for ${localAgents.length} agents`);
+                            // 一次性注册所有本地 agent（不启动定时心跳）
+                            const localAgents = await getLocalAgents(logger);
+                            for (const agent of localAgents) {
+                                if (agent?.id) {
+                                    await registry.register({
+                                        staffId: agent.id,
+                                        name: agent.name || agent.id,
+                                        type: 'agent',
+                                        instanceId: INSTANCE_ID
+                                    });
                                 }
-                                catch (err) {
-                                    logger.error('[WeGirl register] Heartbeat refresh error:', err.message);
-                                }
-                            }, 30000);
-                            logger.info('[WeGirl register] Global heartbeat refresh started');
+                            }
+                            logger.info(`[WeGirl register] Agents registered: ${localAgents.length}`);
                         }
                         catch (syncErr) {
                             logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
