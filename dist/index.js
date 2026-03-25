@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
+import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
 import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
@@ -81,6 +82,7 @@ function hasAccount(staffId) {
 // 模块实例
 let redisClient = null;
 let redisConnectPromise = null;
+let hasSyncedAgents = false; // 确保 syncAgentsFromLocal 只执行一次
 let registry = null;
 let pendingQueue = null;
 let messageRouter = null;
@@ -123,8 +125,11 @@ const plugin = {
         logger.info(`[WeGirl register] Redis config from openclaw.json: ${pluginConfig.redisUrl || 'not set'}`);
         // 初始化 Redis 连接
         async function initRedis() {
-            if (redisConnectPromise)
+            if (redisConnectPromise) {
+                logger.debug('[initRedis] Already initializing or initialized, skipping');
                 return redisConnectPromise;
+            }
+            logger.info('[initRedis] Starting initialization...');
             redisConnectPromise = (async () => {
                 // 统一从 pluginConfig (openclaw.json 的 plugins.wegirl.config) 读取
                 const config = pluginConfig || {};
@@ -173,13 +178,37 @@ const plugin = {
                     // 启动跨实例消息监听
                     await messageRouter.startListening();
                     logger.info('[WeGirl register] Cross-instance message listener started');
-                    // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent
-                    try {
-                        const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
-                        logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
+                    // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent（只执行一次）
+                    if (!hasSyncedAgents) {
+                        try {
+                            const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
+                            hasSyncedAgents = true;
+                            logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
+                            // 启动全局心跳刷新（每 30 秒刷新所有本地 agent 的心跳）
+                            registry = new Registry(redisClient, INSTANCE_ID, logger);
+                            setInterval(async () => {
+                                try {
+                                    // 获取所有本地 agent 并刷新心跳
+                                    const localAgents = await getLocalAgents(logger);
+                                    for (const agent of localAgents) {
+                                        if (agent?.id) {
+                                            await registry.heartbeat(agent.id);
+                                        }
+                                    }
+                                    logger.debug(`[WeGirl register] Heartbeat refreshed for ${localAgents.length} agents`);
+                                }
+                                catch (err) {
+                                    logger.error('[WeGirl register] Heartbeat refresh error:', err.message);
+                                }
+                            }, 30000);
+                            logger.info('[WeGirl register] Global heartbeat refresh started');
+                        }
+                        catch (syncErr) {
+                            logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
+                        }
                     }
-                    catch (syncErr) {
-                        logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
+                    else {
+                        logger.debug('[WeGirl register] Agent sync already done, skipping');
                     }
                 }
             })();
@@ -999,7 +1028,6 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
 }
 // ============ 全局 Stream 消费者（单例模式）============
 const KEY_PREFIX = 'wegirl:';
-const GLOBAL_STREAM_KEY = `${KEY_PREFIX}stream:global`;
 const GLOBAL_CONSUMER_GROUP = 'wegirl-global';
 /**
  * 启动全局 Stream 消费者
@@ -1017,6 +1045,8 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
     const password = config.redisPassword;
     const url = config.redisUrl || 'redis://localhost:6379';
     const consumerName = `consumer-${instanceId}`;
+    // 按实例分 Stream: wegirl:stream:global:{instanceId}
+    const GLOBAL_STREAM_KEY = `${KEY_PREFIX}stream:global:${instanceId}`;
     logger.info(`[WeGirl register] Starting global stream consumer (instance: ${instanceId})`);
     const redisOptions = { db };
     if (password)
@@ -1072,6 +1102,7 @@ async function startGlobalStreamConsumer(context, pluginConfig, instanceId) {
                             }
                             if (fieldMap.data) {
                                 const data = JSON.parse(fieldMap.data);
+                                logger.info(`[WeGirl register] Received message from stream: target=${data.target}, flowType=${data.flowType}`);
                                 await dispatchMessageToAgent(data, context, logger, instanceId);
                             }
                             // ACK 消息

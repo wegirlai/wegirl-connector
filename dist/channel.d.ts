@@ -22,6 +22,7 @@ declare const wegirlPlugin: {
                 redisDb: any;
                 channel: string;
                 enabled: boolean;
+                allowFrom: any[];
             };
             defaultAccountId: () => string;
             isEnabled: (account: any) => boolean;

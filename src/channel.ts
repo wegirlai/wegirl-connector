@@ -20,22 +20,25 @@ const wegirlPlugin = {
     config: {
       listAccountIds: (cfg: any) => {
         const channelCfg = cfg?.channels?.['wegirl'] || {};
-        if (channelCfg?.accounts) {
-          return Object.keys(channelCfg.accounts);
-        }
-        return ['default'];
+        const accounts = channelCfg?.accounts || {};
+        const accountIds = Object.keys(accounts);
+        return accountIds.length > 0 ? accountIds : ['default'];
       },
 
       resolveAccount: (cfg: any, id: string | null) => {
         const accountId = id || 'default';
         const pluginCfg = getWeGirlPluginConfig();
+        // 确保 allowFrom 始终是数组
+        const wegirlCfg = cfg?.channels?.['wegirl'] || {};
+        const allowFrom = wegirlCfg?.allowFrom || ['*'];
         return {
           accountId,
           redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
           redisPassword: pluginCfg?.redisPassword,
           redisDb: pluginCfg?.redisDb ?? 1,
           channel: 'wegirl:messages',
-          enabled: true
+          enabled: true,
+          allowFrom: Array.isArray(allowFrom) ? allowFrom : ['*']
         };
       },
       defaultAccountId: () => 'default',
