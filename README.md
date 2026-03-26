@@ -9,29 +9,8 @@ OpenClaw Gateway 插件 - 微妞 AI 多 Agent 消息路由中枢
 - **统一 StaffId 抽象**: 人类和 Agent 统一使用 StaffId 标识
 - **跨实例通信**: 支持多实例部署的消息路由
 - **HR 入职管理**: 自动化 Agent/人类入职流程
-
-## 架构
-
-```
-Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
-                     ↓
-              wegirl_send (Tool)
-```
-
----
-
-# WeGirl Connector
-
-OpenClaw Gateway 插件 - 微妞 AI 多 Agent 消息路由中枢
-
-## 功能
-
-- **多 Agent 消息路由**: H2A (Human→Agent), A2A (Agent→Agent), A2H (Agent→Human)
-- **Redis Stream 消费**: 消费 wegirl-service 发送的消息
-- **统一 StaffId 抽象**: 人类和 Agent 统一使用 StaffId 标识
-- **跨实例通信**: 支持多实例部署的消息路由
-- **HR 入职管理**: 自动化 Agent/人类入职流程
 - **replyTo 自动转发**: Agent 结果自动转发给指定目标
+- **统一消息构建**: 共享 `buildMessage` 函数确保消息格式一致性
 
 ## 架构
 
@@ -45,9 +24,28 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.0 (2026-03-26) ⭐ Current
+### v2.1.1 (2026-03-26) ⭐ Current
+
+**代码重构 - 统一消息构建**:
+- ✅ 提取 `MessageBuilderOptions` 接口到 `utils.ts`
+- ✅ 提取 `buildMessage` 函数到 `utils.ts`
+- ✅ `send.ts` 和 `sessions-send.ts` 共享使用
+- ✅ 确保所有消息格式一致性
+
+详见 [MILESTONE-v2.1.1.md](./MILESTONE-v2.1.1.md)
+
+---
+
+### v2.1.0 (2026-03-26)
 
 **replyTo 自动转发机制**:
+- ✅ 支持 `replyTo` 自动转发（同步/异步模式）
+- ✅ 支持多个 `replyTo` 目标（数组）
+- ✅ 转发失败自动通知调用方
+- ✅ 新增 `forwarding`/`forwarded` 返回状态
+- ✅ 统一消息构建函数 `buildMessage`
+
+详见 [MILESTONE-v2.1.0.md](./MILESTONE-v2.1.0.md)
 - ✅ 支持 `replyTo` 自动转发（同步/异步模式）
 - ✅ 支持多个 `replyTo` 目标（数组）
 - ✅ 转发失败自动通知调用方
