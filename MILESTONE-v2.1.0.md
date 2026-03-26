@@ -1,119 +1,159 @@
 # MILESTONE-v2.1.0.md
 
-## WeGirl Connector v2.1.0 里程碑
-
-**发布日期**: 2026-03-22
+## 版本: v2.1.0
+## 日期: 2026-03-26
+## 标题: replyTo 自动转发机制
 
 ---
 
 ## 新增功能
 
-### 1. hr_manage 工具参数改进
-- **source 参数**: 将 `from` 参数重命名为 `source`，与其他工具保持一致
-- **source: 前缀保留**: 当传入的 source 包含 `source:` 或 `source：` 前缀时，原样保留传递给后续处理
+### 1. replyTo 自动转发机制
 
-### 2. 入职解析优化
-- **isOnboardFormat 缓存**: 使用变量缓存结果，避免函数重复调用
-- **单行格式支持**: 改进 `parseOnboardData` 函数，支持单行格式的入职信息
-  - 示例: `工号：tiger 姓名：Tiger 电话：138000138000 角色：ceo 能力：管理`
-- **中英文冒号支持**: 同时支持 `:` 和 `：` 作为字段分隔符
+当 `wegirl_send` 包含 `replyTo` 参数时：
 
-### 3. 代码质量改进
-- 移除不必要的 `continue` 语句
-- 优化正则表达式匹配逻辑
-- 统一字段解析方式
+| 模式 | timeoutSeconds | 行为 |
+|------|---------------|------|
+| 同步 | >0 | 等待目标 Agent 完成，结果发给调用方，同时转发给 replyTo |
+| 异步 | 0 或不传 | 立即返回，目标 Agent 完成后转发给 replyTo |
 
----
+**转发特点：**
+- 转发始终使用异步模式（timeoutSeconds=0）
+- 支持多个 replyTo 目标（数组）
+- 转发失败会通知调用方
 
-## 技术细节
+### 2. 多目标转发
 
-### 关键修改文件
-
-#### `src/index.ts`
-- `hr_manage` 工具参数定义：`from` → `source`
-- `create_staff` case：保持 source 参数原样传入
-
-#### `src/hr-message-handler.ts`
-- `handlePrivateMessage`: 缓存 `isOnboardFormat` 结果
-- `parseOnboardData`: 重写解析逻辑，合并多行为单行处理
-- 优化各字段的正则表达式匹配
-
-#### `src/channel.ts`
-- 相关类型定义更新
-
----
-
-## API 变更
-
-### hr_manage 工具
-
-#### create_staff 动作
 ```javascript
-hr_manage({
-  action: "create_staff",
-  source: "source：ou_xxx",  // 保持原样传入，包含前缀
-  message: "我要入职",
+// 单个
+wegirl_send({
   target: "hr",
-  chatType: "direct"
-})
+  message: "列出花名册",
+  replyTo: "tiger"
+});
+
+// 多个
+wegirl_send({
+  target: "hr",
+  message: "列出花名册",
+  replyTo: ["tiger", "boss", "manager"]
+});
 ```
 
-**重要**: source 参数必须保持原样，不要去除 `source:` 或 `source：` 前缀。
+### 3. 返回值更新
+
+| 场景 | 返回值 |
+|------|--------|
+| 有 replyTo | `{ status: 'forwarding'/'forwarded', replyTo: [...] }` |
+| 无 replyTo + 同步 | `{ status: 'ok', response: '...' }` |
+| 无 replyTo + 异步 | `{ status: 'accepted' }` |
 
 ---
 
-## 入职信息格式
+## 技术实现
 
-### 支持的格式
+### deliver 回调改造
 
-#### 多行格式
-```
-工号：tiger
-姓名：Tiger
-电话：138000138000
-角色：ceo
-能力：管理
+```typescript
+// 1. 同步模式：写入 Redis（供调用方获取）
+if (awaitResponse && responseRoutingId) {
+  await redis.lpush(`wegirl:response:${responseRoutingId}`, ...);
+  // 继续执行转发
+}
+
+// 2. 转发给所有 replyTo 目标
+for (const replyToTarget of validReplyToList) {
+  await wegirlSend({
+    target: replyToTarget,
+    message: text,
+    timeoutSeconds: 0  // 始终异步
+  });
+}
+
+// 3. 汇总失败通知
+if (failedTargets.length > 0) {
+  await wegirlSend({
+    target: source,
+    message: `转发给 [${failedNames}] 失败`
+  });
+}
 ```
 
-#### 单行格式
-```
-工号：tiger 姓名：Tiger 电话：138000138000 角色：ceo 能力：管理
-```
+### 统一消息构建函数
 
-#### 英文冒号格式
-```
-工号: tiger
-姓名: Tiger
-...
+```typescript
+buildMessage({
+  flowType,
+  source,
+  target,
+  message,
+  routingId,
+  timeoutSeconds,  // 统一携带
+  metadata
+});
 ```
 
 ---
 
-## 测试建议
+## 使用场景
 
-1. **source 前缀保留**: 验证 `source：ou_xxx` 格式正确传递
-2. **单行解析**: 测试单行格式的入职信息
-3. **多行解析**: 测试传统多行格式
-4. **中英文冒号**: 测试两种冒号都能正确解析
+### 场景 1：让 hr 列出花名册给 tiger
+
+```javascript
+// scout 调用
+await wegirl_send({
+  flowType: "A2A",
+  source: "scout",
+  target: "hr",
+  message: "列出花名册",
+  replyTo: "human:tiger",  // hr 完成后自动发给 tiger
+  routingId: msg.routingId
+});
+
+// 返回给 scout: { status: 'forwarding', replyTo: 'tiger' }
+// tiger 收到: 花名册内容
+```
+
+### 场景 2：多目标通知
+
+```javascript
+await wegirl_send({
+  target: "analyst",
+  message: "分析完成",
+  replyTo: ["manager", "boss"],  // 同时通知两人
+  routingId: msg.routingId
+});
+```
+
+### 场景 3：同步等待结果
+
+```javascript
+const result = await wegirl_send({
+  target: "harvester",
+  message: "抓取 example.com",
+  timeoutSeconds: 60  // 同步等待
+});
+
+// result: { status: 'ok', response: '抓取内容' }
+```
 
 ---
 
-## 相关提交
+## 兼容变更
 
-- `ef84ef0`: feat: hr_manage improvements and source prefix handling
-
----
-
-## 兼容性说明
-
-- 与 wegirl-service v0.3.0+ 完全兼容
-- source 前缀处理需要服务端配合支持
+- **无破坏性变更**：不传 replyTo 时行为不变
+- **返回值格式**：新增 `forwarding`/`forwarded` 状态
+- **内部实现**：统一使用 `buildMessage` 构建消息
 
 ---
 
-## 下一步计划
+## 后续计划
 
-- [ ] 群聊 @ mention 支持
-- [ ] 工作流状态跟踪
-- [ ] 消息重试机制
-- [ ] 更完善的错误处理
+- [ ] 支持转发链（workflow 模式）
+- [ ] 支持转发超时配置
+- [ ] 支持转发重试机制
+
+---
+
+*完成时间: 2026-03-26*
+*负责人: 微妞CTO*

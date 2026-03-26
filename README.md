@@ -20,53 +20,71 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ---
 
+# WeGirl Connector
+
+OpenClaw Gateway 插件 - 微妞 AI 多 Agent 消息路由中枢
+
+## 功能
+
+- **多 Agent 消息路由**: H2A (Human→Agent), A2A (Agent→Agent), A2H (Agent→Human)
+- **Redis Stream 消费**: 消费 wegirl-service 发送的消息
+- **统一 StaffId 抽象**: 人类和 Agent 统一使用 StaffId 标识
+- **跨实例通信**: 支持多实例部署的消息路由
+- **HR 入职管理**: 自动化 Agent/人类入职流程
+- **replyTo 自动转发**: Agent 结果自动转发给指定目标
+
+## 架构
+
+```
+Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
+                     ↓
+              wegirl_send (Tool)
+```
+
+---
+
 ## 📌 里程碑
 
-### v2.1.3 (2026-03-24) ⭐ Current
+### v2.1.0 (2026-03-26) ⭐ Current
 
-**全局配置管理优化**:
-- ✅ 新增 `config.ts` 全局配置管理模块
-- ✅ `startAccount` 直接使用传入的 `ctx.cfg` 设置全局变量
-- ✅ `wegirlSessionsSend` 直接使用传入的 cfg，不重新构建
-- ✅ 各模块统一使用 `getGlobalConfig()` 获取配置
-- ✅ 修复 `replyTo` 数组解析问题
-
-详见 [MILESTONE-v2.1.3.md](./MILESTONE-v2.1.3.md)
-
----
-
-### v2.1.2 (2026-03-23)
-
-**消息来源标记**:
-- ✅ `forwardMsg` 和 `replyMessage` 添加 `fromType: 'inner'` 字段
-- ✅ 便于下游服务区分消息来源和追踪流向
-
-详见 [MILESTONE-v2.1.2.md](./MILESTONE-v2.1.2.md)
-
----
-
-### v2.1.1 (2026-03-22)
-- ✅ 新增 `wegirl_query` 工具 - 支持 id/name/capability 三种查询方式
-- ✅ StaffId 标准化规则 - 普通 ID 转小写，source: 前缀保留
-- ✅ `wegirl_send` 工具描述增强 - 强调先查询再发送
-
-详见 [MILESTONE-v2.1.1.md](./MILESTONE-v2.1.1.md)
-
----
-
-### v2.1.0 (2026-03-22)
-
-**hr_manage 工具增强**:
-- ✅ `from` 参数重命名为 `source`，保持一致性
-- ✅ 保留 `source:` 前缀传递（支持中英文冒号）
-- ✅ 入职解析支持单行格式
-- ✅ `isOnboardFormat` 结果缓存优化
+**replyTo 自动转发机制**:
+- ✅ 支持 `replyTo` 自动转发（同步/异步模式）
+- ✅ 支持多个 `replyTo` 目标（数组）
+- ✅ 转发失败自动通知调用方
+- ✅ 新增 `forwarding`/`forwarded` 返回状态
+- ✅ 统一消息构建函数 `buildMessage`
 
 详见 [MILESTONE-v2.1.0.md](./MILESTONE-v2.1.0.md)
 
 ---
 
 ### v2.0.39 (2026-03-21)
+
+**与 wegirl-service 集成**:
+- ✅ 职责分离：wegirl-connector 只发送，`wegirl-service` 处理业务逻辑
+- ✅ `hr_manage` 参数与 `SessionsSendOptions` 对齐（`source`/`target`/`chatType` 等）
+- ✅ 移除 HR agent 回复拦截
+- ✅ 移除 `RepliesSubscriber`（移至 wegirl-service）
+
+**协议对齐**:
+- ✅ 统一使用 `source`/`target` 替代 `userId`
+- ✅ 新增 `senderName`/`senderOpenId`/`groupId`/`routingId` 参数
+
+详见 [MILESTONE-v2.0.39.md](./MILESTONE-v2.0.39.md)
+
+---
+
+### v2.0 (2026-03-21)
+
+**架构升级**:
+- ✅ 统一 StaffId 抽象（人类和 Agent 统一标识）
+- ✅ 新接口语义：flowType/source/target
+- ✅ `wegirl_send` 成为主接口
+- ✅ H2A/A2A/A2H 消息流支持
+
+详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md)
+
+---
 
 **与 wegirl-service 集成**:
 - ✅ 职责分离：wegirl-connector 只发送，`wegirl-service` 处理业务逻辑
@@ -189,13 +207,47 @@ npm run build
 统一消息发送接口:
 
 ```javascript
+// 基础用法
 {
-  flowType: "H2A",  // 或 "A2A", "A2H"
-  source: "ou_human_openid",
+  flowType: "A2A",
+  source: "scout",
   target: "hr",
-  message: "我要入职",
-  chatType: "direct"
+  message: "列出花名册",
+  replyTo: "human:tiger",  // 结果自动转发给 tiger
+  routingId: "..."
 }
+
+// 多目标转发
+{
+  flowType: "A2A",
+  source: "scout",
+  target: "hr",
+  message: "列出花名册",
+  replyTo: ["tiger", "boss"],  // 结果发给多个人
+  routingId: "..."
+}
+
+// 同步等待
+{
+  flowType: "A2A",
+  source: "scout",
+  target: "harvester",
+  message: "抓取 example.com",
+  timeoutSeconds: 60,  // 同步等待60秒
+  routingId: "..."
+}
+```
+
+**返回值**:
+```javascript
+// 有 replyTo
+{ status: "forwarding", replyTo: ["tiger"], mode: "async" }
+
+// 同步等待
+{ status: "ok", response: { message: "...", payload: {...} }, mode: "sync" }
+
+// 异步
+{ status: "accepted", mode: "async" }
 ```
 
 ### `hr_manage`
