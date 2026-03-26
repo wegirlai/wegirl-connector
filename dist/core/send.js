@@ -3,7 +3,7 @@
 import Redis from 'ioredis';
 import { wegirlSessionsSend } from './sessions-send.js';
 import { getGlobalConfig, getWeGirlPluginConfig, getRedisConfig } from '../config.js';
-import { validateOptions, createSessionContext, isNoReply } from './utils.js';
+import { validateOptions, createSessionContext, isNoReply, buildMessage } from './utils.js';
 const KEY_PREFIX = 'wegirl:';
 const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
 /**
@@ -305,22 +305,24 @@ export async function wegirlSend(options, logger) {
                 logger?.debug?.(`[WeGirlSend] A2H with NO_REPLY, skipping`);
                 return { success: true, routingId, local: true };
             }
-            const replyMessage = {
+            const replyMessage = buildMessage({
                 flowType: 'A2H',
                 source: ctx.source,
                 target: ctx.target,
                 message: options.message,
                 chatType: ctx.chatType,
                 groupId: ctx.groupId,
-                msgType: options.msgType || 'message',
-                fromType: 'inner', // 标记为内部工具调用
-                payload: options.payload,
-                taskId: ctx.taskId,
-                stepId: ctx.stepId,
-                replyTo: ctx.replyTo,
                 routingId: ctx.routingId,
-                timestamp: Date.now(),
-            };
+                msgType: options.msgType || 'message',
+                fromType: 'inner',
+                timeoutSeconds,
+                metadata: {
+                    payload: options.payload,
+                    taskId: ctx.taskId,
+                    stepId: ctx.stepId,
+                    replyTo: ctx.replyTo,
+                }
+            });
             await redis.publish(`${KEY_PREFIX}replies`, JSON.stringify(replyMessage));
             logger?.info?.(`[WeGirlSend] A2H published to replies`);
             return { success: true, routingId, local: true };

@@ -129,4 +129,27 @@ export function inferEntityType(flowType, role) {
 export function isNoReply(replyTo) {
     return replyTo.length === 1 && replyTo[0] === 'system:no_reply';
 }
+/**
+ * 构建标准消息
+ */
+export function buildMessage(opts, baseMetadata) {
+    return {
+        flowType: opts.flowType,
+        source: opts.source,
+        target: opts.target,
+        message: opts.message,
+        chatType: opts.chatType,
+        groupId: opts.groupId,
+        routingId: opts.routingId,
+        msgType: opts.msgType || 'message',
+        fromType: opts.fromType || 'inner',
+        timeoutSeconds: opts.timeoutSeconds || 0,
+        timestamp: Date.now(),
+        metadata: {
+            ...baseMetadata,
+            ...opts.metadata,
+            processedAt: Date.now(),
+        }
+    };
+}
 //# sourceMappingURL=utils.js.map

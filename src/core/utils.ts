@@ -180,3 +180,47 @@ export function inferEntityType(
 export function isNoReply(replyTo: StaffId[]): boolean {
   return replyTo.length === 1 && replyTo[0] === 'system:no_reply';
 }
+
+/**
+ * 消息构建选项
+ */
+export interface MessageBuilderOptions {
+  flowType: string;
+  source: string;
+  target: string;
+  message: string;
+  chatType: string;
+  groupId?: string;
+  routingId: string;
+  msgType?: string;
+  fromType?: string;
+  metadata?: Record<string, any>;
+  timeoutSeconds?: number;
+}
+
+/**
+ * 构建标准消息
+ */
+export function buildMessage(
+  opts: MessageBuilderOptions,
+  baseMetadata?: Record<string, any>
+): any {
+  return {
+    flowType: opts.flowType,
+    source: opts.source,
+    target: opts.target,
+    message: opts.message,
+    chatType: opts.chatType,
+    groupId: opts.groupId,
+    routingId: opts.routingId,
+    msgType: opts.msgType || 'message',
+    fromType: opts.fromType || 'inner',
+    timeoutSeconds: opts.timeoutSeconds || 0,
+    timestamp: Date.now(),
+    metadata: {
+      ...baseMetadata,
+      ...opts.metadata,
+      processedAt: Date.now(),
+    }
+  };
+}

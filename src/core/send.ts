@@ -14,7 +14,9 @@ import {
   validateOptions, 
   createSessionContext,
   isNoReply,
-  generateId
+  generateId,
+  buildMessage,
+  type MessageBuilderOptions
 } from './utils.js';
 
 const KEY_PREFIX = 'wegirl:';
@@ -412,22 +414,24 @@ export async function wegirlSend(
         return { success: true, routingId, local: true };
       }
       
-      const replyMessage = {
+      const replyMessage = buildMessage({
         flowType: 'A2H',
         source: ctx.source,
         target: ctx.target,
         message: options.message,
         chatType: ctx.chatType,
         groupId: ctx.groupId,
-        msgType: options.msgType || 'message',
-        fromType: 'inner',  // 标记为内部工具调用
-        payload: options.payload,
-        taskId: ctx.taskId,
-        stepId: ctx.stepId,
-        replyTo: ctx.replyTo,
         routingId: ctx.routingId,
-        timestamp: Date.now(),
-      };
+        msgType: options.msgType || 'message',
+        fromType: 'inner',
+        timeoutSeconds,
+        metadata: {
+          payload: options.payload,
+          taskId: ctx.taskId,
+          stepId: ctx.stepId,
+          replyTo: ctx.replyTo,
+        }
+      });
       
       await redis.publish(`${KEY_PREFIX}replies`, JSON.stringify(replyMessage));
       logger?.info?.(`[WeGirlSend] A2H published to replies`);

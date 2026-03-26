@@ -2,6 +2,7 @@
 
 import Redis from 'ioredis';
 import { getWeGirlRuntime } from "../runtime.js";
+import { buildMessage, type MessageBuilderOptions } from './utils.js';
 
 type ReplyPayload = {
   text?: string;
@@ -221,43 +222,6 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
     // 获取 timeoutSeconds（从 options.metadata 或默认值）
     const timeoutSeconds = originalMetadata?.timeoutSeconds || 0;
     const responseTtl = timeoutSeconds > 0 ? timeoutSeconds + 30 : 60; // 同步模式用 timeout+30，异步默认60
-
-    // 统一消息构建函数
-    interface MessageBuilderOptions {
-      flowType: string;
-      source: string;
-      target: string;
-      message: string;
-      chatType: string;
-      groupId?: string;
-      routingId: string;
-      msgType?: string;
-      fromType?: string;
-      metadata?: Record<string, any>;
-    }
-
-    function buildMessage(opts: MessageBuilderOptions): any {
-      return {
-        flowType: opts.flowType,
-        source: opts.source,
-        target: opts.target,
-        message: opts.message,
-        chatType: opts.chatType,
-        groupId: opts.groupId || (opts.chatType === 'group' ? chatId : undefined),
-        routingId: opts.routingId,
-        msgType: opts.msgType || 'message',
-        fromType: opts.fromType || 'inner',
-        timeoutSeconds, // 统一携带 timeoutSeconds
-        timestamp: Date.now(),
-        metadata: {
-          ...opts.metadata,
-          agentId,
-          sessionKey,
-          messageId,
-          processedAt: Date.now(),
-        }
-      };
-    }
 
     // 定义 forwardMsg 和 flowType 在更高作用域，以便后续回调函数访问
     let forwardMsg: any;

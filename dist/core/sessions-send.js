@@ -1,6 +1,7 @@
 // src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 import Redis from 'ioredis';
 import { getWeGirlRuntime } from "../runtime.js";
+import { buildMessage } from './utils.js';
 // Redis 连接缓存
 let redisClient = null;
 let redisConnectPromise = null;
@@ -151,28 +152,6 @@ export async function wegirlSessionsSend(options) {
         // 获取 timeoutSeconds（从 options.metadata 或默认值）
         const timeoutSeconds = originalMetadata?.timeoutSeconds || 0;
         const responseTtl = timeoutSeconds > 0 ? timeoutSeconds + 30 : 60; // 同步模式用 timeout+30，异步默认60
-        function buildMessage(opts) {
-            return {
-                flowType: opts.flowType,
-                source: opts.source,
-                target: opts.target,
-                message: opts.message,
-                chatType: opts.chatType,
-                groupId: opts.groupId || (opts.chatType === 'group' ? chatId : undefined),
-                routingId: opts.routingId,
-                msgType: opts.msgType || 'message',
-                fromType: opts.fromType || 'inner',
-                timeoutSeconds, // 统一携带 timeoutSeconds
-                timestamp: Date.now(),
-                metadata: {
-                    ...opts.metadata,
-                    agentId,
-                    sessionKey,
-                    messageId,
-                    processedAt: Date.now(),
-                }
-            };
-        }
         // 定义 forwardMsg 和 flowType 在更高作用域，以便后续回调函数访问
         let forwardMsg;
         let flowType = 'H2A'; // 默认值，后续会被覆盖
@@ -402,9 +381,15 @@ export async function wegirlSessionsSend(options) {
                     }
                     return;
                 }
-                // ========== 单 agent 回复 ==========
-                // 发送给 source（调用方）
-                log?.info?.(`${logPrefix} replies] sending reply to source: ${text.substring(0, 50)}...`);
+                // ========== 单 agent 回复（原有逻辑）==========
+                // 只有 channel="wegirl" 或 originatingChannel="wegirl" 时才通过 outbound 发送
+                // 其他 channel 由 Gateway 自动路由，不处理
+                const effectiveChannel = originalMetadata?.originatingChannel || channel;
+                if (effectiveChannel !== 'wegirl') {
+                    log?.debug?.(`${logPrefix} effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
+                    return;
+                }
+                log?.info?.(`${logPrefix} replies] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
                 try {
                     const pub = await getRedisPublisher(cfg);
                     if (!pub) {
