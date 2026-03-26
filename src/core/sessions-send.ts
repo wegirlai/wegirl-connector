@@ -218,6 +218,47 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       return map[flowType] || flowType;
     }
 
+    // 获取 timeoutSeconds（从 options.metadata 或默认值）
+    const timeoutSeconds = originalMetadata?.timeoutSeconds || 0;
+    const responseTtl = timeoutSeconds > 0 ? timeoutSeconds + 30 : 60; // 同步模式用 timeout+30，异步默认60
+
+    // 统一消息构建函数
+    interface MessageBuilderOptions {
+      flowType: string;
+      source: string;
+      target: string;
+      message: string;
+      chatType: string;
+      groupId?: string;
+      routingId: string;
+      msgType?: string;
+      fromType?: string;
+      metadata?: Record<string, any>;
+    }
+
+    function buildMessage(opts: MessageBuilderOptions): any {
+      return {
+        flowType: opts.flowType,
+        source: opts.source,
+        target: opts.target,
+        message: opts.message,
+        chatType: opts.chatType,
+        groupId: opts.groupId || (opts.chatType === 'group' ? chatId : undefined),
+        routingId: opts.routingId,
+        msgType: opts.msgType || 'message',
+        fromType: opts.fromType || 'inner',
+        timeoutSeconds, // 统一携带 timeoutSeconds
+        timestamp: Date.now(),
+        metadata: {
+          ...opts.metadata,
+          agentId,
+          sessionKey,
+          messageId,
+          processedAt: Date.now(),
+        }
+      };
+    }
+
     // 定义 forwardMsg 和 flowType 在更高作用域，以便后续回调函数访问
     let forwardMsg: any;
     let flowType: string = 'H2A'; // 默认值，后续会被覆盖
@@ -228,33 +269,27 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
       flowType = await determineFlowType(redis, source, target);
       log?.info?.(`${logPrefix} Flow type determined: ${flowType} (source=${source}, target=${target})`);
       
-      forwardMsg = {
-        // 标准 V2 字段
-        flowType: flowType,
-        source: source,
-        target: target,
+      forwardMsg = buildMessage({
+        flowType,
+        source,
+        target,
         message,
         chatType,
         groupId: chatType === 'group' ? chatId : undefined,
         routingId,
-        msgType: 'message',
-        fromType: options.fromType || 'inner',  // 从参数获取，默认为 'inner'
-        // 元数据
+        fromType: options.fromType || 'inner',
         metadata: {
           ...originalMetadata,
           matchedBy: route.matchedBy,
           originalChannel: channel,
-          agentId,
-          sessionKey,
-          messageId,
           status: 'pending',
           createdAt,
           expiresAt: createdAt + 3600000,
-        },
-        timestamp: Date.now()
-      };
+        }
+      });
+      
       await redis.publish('wegirl:forward', JSON.stringify(forwardMsg));
-      log?.info?.(`${logPrefix} forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}, flowType=${flowType}`);
+      log?.info?.(`${logPrefix} forward] Message forwarded via Redis: agentId=${agentId}, sessionKey=${sessionKey}, routingId=${routingId}, flowType=${flowType}, timeoutSeconds=${timeoutSeconds}`);
     } catch (err: any) {
       log?.error?.(`${logPrefix} forward] Redis forward failed:`, err.message);
     }
@@ -332,17 +367,25 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           try {
             const redis = await getRedisPublisher(cfg);
             if (redis) {
-              const responseData = {
+              const responseData = buildMessage({
+                flowType: reverseFlowType(flowType),
+                source: target,
+                target: source,
                 message: text,
-                payload: {
+                chatType,
+                routingId: responseRoutingId,
+                msgType: 'response',
+                fromType: 'inner',
+                metadata: {
                   isError: payload.isError,
+                  originalRoutingId: routingId,
                   ...payload.channelData
-                },
-                timestamp: Date.now()
-              };
+                }
+              });
+              
               await redis.lpush(`wegirl:response:${responseRoutingId}`, JSON.stringify(responseData));
-              await redis.expire(`wegirl:response:${responseRoutingId}`, 60);
-              log?.info?.(`${logPrefix} Sync response written to Redis: ${responseRoutingId}`);
+              await redis.expire(`wegirl:response:${responseRoutingId}`, responseTtl); // 使用计算的 TTL
+              log?.info?.(`${logPrefix} Sync response written to Redis: ${responseRoutingId}, TTL=${responseTtl}s`);
             }
           } catch (err: any) {
             log?.error?.(`${logPrefix} Failed to write sync response: ${err.message}`);
@@ -374,33 +417,27 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               replyStatus = 'completed';  // 正常完成
             }
 
-            // 直接发送当前 agent 的回复（不聚合）- 使用标准 V2 格式
-            // 使用 reverseFlowType 计算对调流向，避免重复查询 Redis
-            const groupReplyFlowType = reverseFlowType(flowType);
-            const replyMessage = {
-              // 标准 V2 字段
-              flowType: groupReplyFlowType,
+            // 使用统一函数构建群聊回复消息
+            const replyMessage = buildMessage({
+              flowType: reverseFlowType(flowType),
               source: target,
-              target: source, // 群聊时为目标群
+              target: source,
               message: text,
               chatType: 'group',
-              groupId: groupId,
+              groupId,
               routingId,
               msgType: 'message',
-              fromType: 'inner',  // 标记为内部工具调用
-              // 元数据
+              fromType: 'inner',
               metadata: {
                 replyStatus,
-                sessionKey,
                 taskId,
                 isFinal: true,
-                processedAt: Date.now(),
                 duration: Date.now() - createdAt,
-              },
-              timestamp: Date.now(),
-            };
+              }
+            });
+            
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            log?.info?.(`${logPrefix} Group reply published to wegirl:replies from ${target}, flowType=${groupReplyFlowType}`);
+            log?.info?.(`${logPrefix} Group reply published to wegirl:replies from ${target}, flowType=${replyMessage.flowType}, timeoutSeconds=${timeoutSeconds}`);
 
             return; // 群聊多 agent 模式已处理，不执行后续单 agent 逻辑
           } catch (err: any) {
@@ -425,69 +462,57 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
             log?.error?.(`${logPrefix} replies] Redis publisher not connected`);
             return;
           }
-          const replyId = `wegirl-reply-${Date.now()}`;
-          // 使用 reverseFlowType 计算对调流向，避免重复查询 Redis
-          const replyFlowType = reverseFlowType(flowType);
-          const replyMessage = {
-            // 标准 V2 字段
-            flowType: replyFlowType,
+          
+          // 使用统一函数构建单 agent 回复消息
+          const replyMessage = buildMessage({
+            flowType: reverseFlowType(flowType),
             source: target,
             target: source,
             message: text,
             chatType,
-            groupId: chatType === 'group' ? chatId : undefined,
             routingId,
             msgType: 'message',
-            fromType: 'inner',  // 标记为内部工具调用
-            // 元数据
+            fromType: 'inner',
             metadata: {
               inReplyTo: messageId,
-              agentId: target,
-              sessionKey,
               status: 'completed',
               isFinal: true,
-              processedAt: Date.now(),
               duration: Date.now() - createdAt,
-            },
-            timestamp: Date.now(),
-          };
-          //log?.info?.(`${logPrefix} replyMessage params:`, JSON.stringify(replyMessage, null, 2));
-
+            }
+          });
+          
           // 使用 console.log 输出到 stderr（Gateway 日志会捕获）
           console.log(`${logPrefix} replies]`, JSON.stringify(replyMessage, null, 2));
 
           await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-          log?.info?.(`${logPrefix} replies] Reply published to wegirl:replies, flowType=${replyFlowType}`);
+          log?.info?.(`${logPrefix} replies] Reply published to wegirl:replies, flowType=${replyMessage.flowType}, timeoutSeconds=${timeoutSeconds}`);
         } catch (err: any) {
           // 发送失败，发布错误回复
           try {
             const pub = await getRedisPublisher(cfg);
             if (pub) {
-              const errorReply = {
-                // 标准 V2 字段
+              // 使用统一函数构建错误回复消息
+              const errorReply = buildMessage({
                 flowType: 'A2H',
                 source: target,
                 target: chatId,
                 message: '',
                 chatType,
-                groupId: chatType === 'group' ? chatId : undefined,
                 routingId,
                 msgType: 'error',
-                // 元数据
+                fromType: 'inner',
                 metadata: {
                   inReplyTo: messageId,
-                  agentId: target,
-                  sessionKey,
                   status: 'failed',
                   isFinal: true,
-                  processedAt: Date.now(),
                   duration: Date.now() - createdAt,
                   error: err.message,
                   errorCode: 'REPLY_PUBLISH_FAILED',
-                },
-                timestamp: Date.now(),
-              };
+                }
+              });
+              
               await pub.publish('wegirl:replies', JSON.stringify(errorReply));
+              log?.info?.(`${logPrefix} Error reply published, timeoutSeconds=${timeoutSeconds}`);
             }
           } catch { }
           log?.error?.(`${logPrefix} replies] Failed to publish reply: ${err.message}`);
