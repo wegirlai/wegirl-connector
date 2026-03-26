@@ -148,6 +148,103 @@ function getCurrentInstanceId(): string {
 }
 
 /**
+ * 同步等待响应
+ * 使用 Redis brpop 阻塞等待，超时返回 timeout 状态
+ */
+async function waitForResponse(
+  redis: Redis,
+  routingId: string,
+  timeoutMs: number,
+  logger?: any
+): Promise<{
+  success: boolean;
+  status: 'ok' | 'timeout' | 'error';
+  response?: { message: string; payload?: Record<string, any> };
+  duration: number;
+}> {
+  const startTime = Date.now();
+  const responseKey = `${KEY_PREFIX}response:${routingId}`;
+  
+  logger?.info?.(`[WeGirlSend] Waiting for response: ${routingId}, timeout=${timeoutMs}ms`);
+  
+  try {
+    // 使用 brpop 阻塞等待，超时时间为 timeoutMs 毫秒
+    // brpop 返回 [key, value] 或 null（超时）
+    const result = await redis.brpop(responseKey, timeoutMs / 1000);
+    
+    const duration = Date.now() - startTime;
+    
+    if (!result) {
+      // 超时
+      logger?.warn?.(`[WeGirlSend] Response timeout: ${routingId}, waited ${duration}ms`);
+      // 清理等待标记
+      await redis.del(`${KEY_PREFIX}await:${routingId}`);
+      return {
+        success: false,
+        status: 'timeout',
+        duration
+      };
+    }
+    
+    // 解析响应
+    const [key, value] = result;
+    const response = JSON.parse(value);
+    
+    logger?.info?.(`[WeGirlSend] Response received: ${routingId}, duration=${duration}ms`);
+    
+    // 清理等待标记
+    await redis.del(`${KEY_PREFIX}await:${routingId}`);
+    
+    return {
+      success: true,
+      status: 'ok',
+      response: {
+        message: response.message || '',
+        payload: response.payload
+      },
+      duration
+    };
+    
+  } catch (err: any) {
+    const duration = Date.now() - startTime;
+    logger?.error?.(`[WeGirlSend] Wait failed: ${err.message}`);
+    
+    // 清理等待标记
+    await redis.del(`${KEY_PREFIX}await:${routingId}`);
+    
+    return {
+      success: false,
+      status: 'error',
+      duration
+    };
+  }
+}
+
+/**
+ * 写入响应（由接收方 Agent 调用）
+ */
+export async function writeResponse(
+  redis: Redis,
+  routingId: string,
+  message: string,
+  payload?: Record<string, any>,
+  logger?: any
+): Promise<void> {
+  const responseKey = `${KEY_PREFIX}response:${routingId}`;
+  
+  const response = {
+    message,
+    payload,
+    timestamp: Date.now()
+  };
+  
+  await redis.lpush(responseKey, JSON.stringify(response));
+  await redis.expire(responseKey, 60); // 60秒后自动清理
+  
+  logger?.debug?.(`[WeGirlSend] Response written: ${routingId}`);
+}
+
+/**
  * 写入 Redis Stream（跨实例投递）
  */
 async function writeToStream(
@@ -234,6 +331,7 @@ async function saveSessionRoutingId(
  * 3. A2H 直接发布到 replies
  * 4. 跨实例 → 写入 Redis Stream
  * 5. 本地 → 调用 V1 wegirlSessionsSend
+ * 6. 同步模式 → 阻塞等待响应（timeoutSeconds > 0）
  */
 export async function wegirlSend(
   options: WeGirlSendOptions,
@@ -255,8 +353,23 @@ export async function wegirlSend(
       : options.replyTo,
   };
   
+  // 处理 timeoutSeconds
+  const timeoutSeconds = Math.min(Math.max(0, options.timeoutSeconds || 0), 300);
+  const isSyncMode = timeoutSeconds > 0;
+  
   // 添加详细日志
-  logger?.info?.(`=====>[WeGirlSend] Options: ${JSON.stringify(normalizedOptions)}`);
+  logger?.info?.(`=====>[WeGirlSend] Options: ${JSON.stringify(normalizedOptions)}, sync=${isSyncMode}, timeout=${timeoutSeconds}s`);
+  
+  // 同步模式：创建响应队列
+  if (isSyncMode) {
+    await redis.setex(`${KEY_PREFIX}await:${routingId}`, timeoutSeconds + 30, JSON.stringify({
+      source: normalizedOptions.source,
+      target: normalizedOptions.target,
+      timeout: timeoutSeconds,
+      createdAt: Date.now()
+    }));
+    logger?.debug?.(`[WeGirlSend] Created await key for sync mode: ${routingId}`);
+  }
   
   try {
     // 1. 验证选项
@@ -275,6 +388,11 @@ export async function wegirlSend(
     logger?.debug?.(`[WeGirlSend] Saved routingId ${routingId} for session ${ctx.source}`);
     
     if (!targetInfo) {
+      // 同步模式：清理等待标记
+      if (isSyncMode) {
+        await redis.del(`${KEY_PREFIX}await:${routingId}`);
+      }
+      
       // 查询建议
       const suggestions = await findSimilarStaff(redis, ctx.target);
       throw new Error(
@@ -322,10 +440,56 @@ export async function wegirlSend(
     const targetInstanceId = targetInfo.instanceId || currentInstanceId;
     const isLocal = targetInstanceId === currentInstanceId;
     
+    const startTime = Date.now();
+    
     // 7. 跨实例：写入 Stream
     if (!isLocal) {
-      await writeToStream(redis, targetInstanceId, ctx, options.message, options.msgType, options.payload);
+      // 同步模式：传递 timeout 信息
+      const streamData: any = {
+        routingId: ctx.routingId,
+        flowType: ctx.flowType,
+        source: ctx.source,
+        target: ctx.target,
+        message: options.message,
+        chatType: ctx.chatType,
+        groupId: ctx.groupId || '',
+        msgType: options.msgType || 'message',
+        replyTo: JSON.stringify(ctx.replyTo),
+        taskId: ctx.taskId || '',
+        stepId: ctx.stepId || '',
+        stepTotalAgents: ctx.stepTotalAgents?.toString() || '0',
+        timestamp: Date.now().toString(),
+      };
+      
+      if (isSyncMode) {
+        streamData.timeoutSeconds = timeoutSeconds.toString();
+        streamData.awaitResponse = 'true';
+      }
+      
+      if (options.payload) {
+        streamData.payload = JSON.stringify(options.payload);
+      }
+      
+      const entries = Object.entries(streamData).flat() as string[];
+      await redis.xadd(
+        `${STREAM_PREFIX}${targetInstanceId}`, 
+        'MAXLEN', '~', 5000,
+        '*', 
+        ...entries
+      );
+      
       logger?.info?.(`[WeGirlSend] Cross-instance delivery to ${targetInstanceId}`);
+      
+      // 同步模式：阻塞等待响应
+      if (isSyncMode) {
+        const response = await waitForResponse(redis, routingId, timeoutSeconds * 1000, logger);
+        return {
+          ...response,
+          routingId,
+          local: false,
+          targetInstanceId
+        };
+      }
       
       return { 
         success: true, 
@@ -356,6 +520,13 @@ export async function wegirlSend(
     if (ctx.taskId) metadata.taskId = ctx.taskId;
     if (ctx.stepId) metadata.stepId = ctx.stepId;
     
+    // 同步模式：传递等待信息给 V1
+    if (isSyncMode) {
+      metadata.awaitResponse = true;
+      metadata.timeoutSeconds = timeoutSeconds;
+      metadata.responseRoutingId = routingId;
+    }
+    
     // 调用 V1 - 使用统一参数名
     await wegirlSessionsSend({
       message: options.message,
@@ -377,9 +548,24 @@ export async function wegirlSend(
       log: logger,
     });
     
+    // 同步模式：阻塞等待响应
+    if (isSyncMode) {
+      const response = await waitForResponse(redis, routingId, timeoutSeconds * 1000, logger);
+      return {
+        ...response,
+        routingId,
+        local: true
+      };
+    }
+    
     return { success: true, routingId, local: true };
     
   } catch (err: any) {
+    // 同步模式：清理等待标记
+    if (isSyncMode) {
+      await redis.del(`${KEY_PREFIX}await:${routingId}`);
+    }
+    
     logger?.error?.(`[WeGirlSend] Failed: ${err.message}`);
     return { 
       success: false, 

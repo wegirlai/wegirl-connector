@@ -58,6 +58,8 @@ interface WeGirlSendParams {
   replyChannel?: string;
   replyAccountId?: string;
   replyTo?: string;
+  // 同步等待参数
+  timeoutSeconds?: number;
 }
 
 export class WeGirlTools {
@@ -100,11 +102,15 @@ export class WeGirlTools {
 
   // wegirl_send 工具主入口
   async send(params: WeGirlSendParams): Promise<any> {
-    const { target, message } = params;
+    const { target, message, timeoutSeconds } = params;
     const routingId = randomUUID();
     const startTime = Date.now();
 
-    this.logger.info(`[WeGirlTools] [${routingId}] Sending message to ${target}`);
+    // 处理 timeoutSeconds（0 或 undefined = 异步，>0 = 同步等待）
+    const effectiveTimeout = Math.min(Math.max(0, timeoutSeconds || 0), 300);
+    const isSyncMode = effectiveTimeout > 0;
+
+    this.logger.info(`[WeGirlTools] [${routingId}] Sending message to ${target}, sync=${isSyncMode}, timeout=${effectiveTimeout}s`);
 
     // 检查 target 是否存在于 accounts cache 中
     const targetStaffId = target.replace(/^agent:/, '').replace(/^human:/, '');
@@ -116,8 +122,9 @@ export class WeGirlTools {
       if (!freshData || Object.keys(freshData).length === 0) {
         return {
           content: [{ type: "text" as const, text: `目标 "${target}" 不存在。请确认 staffId 是否正确，或使用 wegirl_query 查询可用列表。` }],
+          isError: true,
           details: {
-            success: false,
+            status: 'error',
             error: `Target not found: ${target}`,
             routingId
           }
@@ -132,83 +139,138 @@ export class WeGirlTools {
       target,
       messageLength: message.length,
       from: params.from || 'unknown',
-      instanceId: this.instanceId
+      instanceId: this.instanceId,
+      syncMode: isSyncMode,
+      timeout: effectiveTimeout
     });
-
-    const routingTarget = this.parseTarget(target);
-
-    // 发布路由解析事件
-    await this.publishRoutingEvent(routingId, 'parsed', {
-      mode: routingTarget.mode,
-      agentId: routingTarget.agentId,
-      userId: routingTarget.userId,
-      capability: routingTarget.capability
-    });
-
-    const envelope: MessageEnvelope = {
-      metadata: {
-        msgId: randomUUID(),
-        routingId,
-        timestamp: Date.now(),
-        priority: 'normal',
-        ttl: 3600
-      },
-      from: {
-        type: 'agent',
-        agentId: params.from || 'unknown',
-        instanceId: this.instanceId
-      },
-      to: this.buildAddress(routingTarget),
-      type: 'event',
-      payload: { format: 'text', content: message }
-    };
 
     try {
-      let result: any;
-      switch (routingTarget.mode) {
-        case 'agent':
-          result = await this.deliverToAgent(routingTarget.agentId!, envelope, params, routingId);
-          break;
-        case 'human':
-          result = await this.deliverToHuman(routingTarget.userId!, envelope, params, routingId);
-          break;
-        case 'capability':
-          result = await this.deliverToCapability(routingTarget.capability!, routingTarget.strategy!, envelope, params, routingId);
-          break;
-        case 'broadcast':
-          result = await this.broadcast(envelope, params, routingId);
-          break;
-        default:
-          throw new Error(`Unsupported routing mode: ${routingTarget.mode}`);
-      }
+      // 导入 wegirlSend
+      const { wegirlSend } = await import('./core/send.js');
+      
+      // 构建 WeGirlSendOptions
+      const sendOptions = {
+        flowType: 'A2A' as const,
+        source: params.from || 'unknown',
+        target: targetStaffId,
+        message,
+        chatType: (params.chatType || 'direct') as 'direct' | 'group',
+        groupId: params.chatId,
+        replyTo: params.replyTo || params.from || 'unknown',
+        routingId,
+        timeoutSeconds: effectiveTimeout
+      };
 
-      // 发布成功事件
+      const result = await wegirlSend(sendOptions, this.logger);
+      
+      const duration = Date.now() - startTime;
+
+      // 发布完成事件
       await this.publishRoutingEvent(routingId, 'completed', {
-        duration: Date.now() - startTime,
-        result
+        duration,
+        result,
+        syncMode: isSyncMode
       });
 
-      // 返回 OpenClaw 期望的格式
-      const resultText = result.success 
-        ? `消息已发送给 ${target}: ${result.target || target}`
-        : `发送失败: ${result.error || '未知错误'}`;
+      // 构建 ToolResult 返回
+      if (isSyncMode) {
+        // 同步模式返回
+        if (result.status === 'timeout') {
+          return {
+            content: [{ type: "text" as const, text: `请求超时：等待 ${effectiveTimeout} 秒后未收到响应` }],
+            isError: true,
+            details: {
+              status: 'timeout',
+              routingId,
+              duration,
+              target,
+              mode: 'sync'
+            }
+          };
+        }
+        
+        if (!result.success) {
+          return {
+            content: [{ type: "text" as const, text: `发送失败: ${result.error || '未知错误'}` }],
+            isError: true,
+            details: {
+              status: 'error',
+              error: result.error,
+              routingId,
+              duration,
+              target,
+              mode: 'sync'
+            }
+          };
+        }
+        
+        // 成功收到响应
+        const responseMessage = result.response?.message || '(无响应内容)';
+        return {
+          content: [{ type: "text" as const, text: responseMessage }],
+          details: {
+            status: 'ok',
+            routingId,
+            duration,
+            target,
+            mode: 'sync',
+            local: result.local,
+            targetInstanceId: result.targetInstanceId,
+            responsePayload: result.response?.payload
+          }
+        };
+      }
+      
+      // 异步模式返回
+      if (!result.success) {
+        return {
+          content: [{ type: "text" as const, text: `发送失败: ${result.error || '未知错误'}` }],
+          isError: true,
+          details: {
+            status: 'error',
+            error: result.error,
+            routingId,
+            duration,
+            target,
+            mode: 'async'
+          }
+        };
+      }
       
       return {
-        content: [{ type: "text" as const, text: resultText }],
+        content: [{ type: "text" as const, text: `消息已发送给 ${target}` }],
         details: {
-          success: result.success,
-          target: result.target,
+          status: 'accepted',
           routingId,
-          ...result
+          duration,
+          target,
+          mode: 'async',
+          local: result.local,
+          targetInstanceId: result.targetInstanceId
         }
       };
+      
     } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
       // 发布失败事件
       await this.publishRoutingEvent(routingId, 'failed', {
         error: error.message,
-        duration: Date.now() - startTime
+        duration
       });
-      throw error;
+      
+      return {
+        content: [{ type: "text" as const, text: `发送异常: ${error.message}` }],
+        isError: true,
+        details: {
+          status: 'error',
+          error: error.message,
+          routingId,
+          duration,
+          target,
+          mode: isSyncMode ? 'sync' : 'async'
+        }
+      };
     }
   }
 

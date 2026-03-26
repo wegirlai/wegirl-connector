@@ -10,6 +10,7 @@ interface WeGirlSendParams {
     replyChannel?: string;
     replyAccountId?: string;
     replyTo?: string;
+    timeoutSeconds?: number;
 }
 export declare class WeGirlTools {
     private redis;

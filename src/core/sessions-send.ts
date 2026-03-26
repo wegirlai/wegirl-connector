@@ -323,6 +323,32 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           return;
         }
 
+        // ========== 同步等待响应回写 ==========
+        // 检查是否有同步等待标记
+        const responseRoutingId = originalMetadata?.responseRoutingId;
+        const awaitResponse = originalMetadata?.awaitResponse;
+        
+        if (awaitResponse && responseRoutingId) {
+          try {
+            const redis = await getRedisPublisher(cfg);
+            if (redis) {
+              const responseData = {
+                message: text,
+                payload: {
+                  isError: payload.isError,
+                  ...payload.channelData
+                },
+                timestamp: Date.now()
+              };
+              await redis.lpush(`wegirl:response:${responseRoutingId}`, JSON.stringify(responseData));
+              await redis.expire(`wegirl:response:${responseRoutingId}`, 60);
+              log?.info?.(`${logPrefix} Sync response written to Redis: ${responseRoutingId}`);
+            }
+          } catch (err: any) {
+            log?.error?.(`${logPrefix} Failed to write sync response: ${err.message}`);
+          }
+        }
+
         // ========== 群聊多 agent 处理 ==========
         // 每个 agent 完成时立即回复（不等待聚合）
         if (chatType === 'group' && taskId && agentCount && agentCount > 1) {

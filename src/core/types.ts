@@ -81,6 +81,14 @@ export interface WeGirlSendOptions {
   
   /** 扩展元数据（可选） */
   metadata?: Record<string, any>;
+  
+  /**
+   * 超时秒数（可选，默认 0）
+   * - 0: 异步发送，立即返回
+   * - >0: 同步等待，阻塞直到收到响应或超时
+   * - 最大值: 300 (5分钟)
+   */
+  timeoutSeconds?: number;
 }
 
 /**
@@ -104,6 +112,13 @@ export interface SendResult {
   local: boolean;           // 是否本地处理
   targetInstanceId?: string;
   error?: string;
+  // 同步模式额外字段
+  status?: 'ok' | 'timeout' | 'error';
+  response?: {
+    message: string;
+    payload?: Record<string, any>;
+  };
+  duration?: number;
 }
 
 /**

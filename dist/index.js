@@ -282,6 +282,13 @@ const plugin = {
                         routingId: {
                             type: 'string',
                             description: '路由追踪ID（必填）。从当前消息上下文中提取（如 message.routingId 或 context.RoutingId），用于保持调用链一致。整个 workflow 中必须传递相同的 routingId。'
+                        },
+                        timeoutSeconds: {
+                            type: 'number',
+                            minimum: 0,
+                            maximum: 300,
+                            description: '超时秒数（可选，默认 0）。0=异步发送立即返回；>0=同步等待响应，最大 300 秒（5分钟）',
+                            default: 0
                         }
                     },
                     required: ['flowType', 'source', 'target', 'message', 'replyTo', 'routingId']
@@ -290,19 +297,28 @@ const plugin = {
                     logger.info(`[wegirl_send] 调用: ${JSON.stringify(params)}`);
                     try {
                         const result = await wegirlSend(params, logger);
+                        const resultText = result.success
+                            ? `消息已发送给 ${params.target}`
+                            : `发送失败: ${result.error || '未知错误'}`;
                         return {
-                            success: result.success,
-                            routingId: result.routingId,
-                            local: result.local,
-                            targetInstanceId: result.targetInstanceId,
-                            error: result.error
+                            content: [{ type: "text", text: resultText }],
+                            details: {
+                                success: result.success,
+                                routingId: result.routingId,
+                                local: result.local,
+                                targetInstanceId: result.targetInstanceId,
+                                error: result.error
+                            }
                         };
                     }
                     catch (err) {
                         logger.error(`[wegirl_send] 失败:`, err.message);
                         return {
-                            success: false,
-                            error: err.message
+                            content: [{ type: "text", text: `发送失败: ${err.message}` }],
+                            details: {
+                                success: false,
+                                error: err.message
+                            }
                         };
                     }
                 }

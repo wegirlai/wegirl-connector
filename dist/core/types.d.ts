@@ -62,6 +62,13 @@ export interface WeGirlSendOptions {
     payload?: Record<string, any>;
     /** 扩展元数据（可选） */
     metadata?: Record<string, any>;
+    /**
+     * 超时秒数（可选，默认 0）
+     * - 0: 异步发送，立即返回
+     * - >0: 同步等待，阻塞直到收到响应或超时
+     * - 最大值: 300 (5分钟)
+     */
+    timeoutSeconds?: number;
 }
 /**
  * Staff 信息（从 Redis 查询）
@@ -83,6 +90,12 @@ export interface SendResult {
     local: boolean;
     targetInstanceId?: string;
     error?: string;
+    status?: 'ok' | 'timeout' | 'error';
+    response?: {
+        message: string;
+        payload?: Record<string, any>;
+    };
+    duration?: number;
 }
 /**
  * Session 上下文
