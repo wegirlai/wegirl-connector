@@ -101,6 +101,39 @@ export class WeGirlTools {
                 syncMode: isSyncMode
             });
             // 构建 ToolResult 返回
+            const hasReplyTo = params.replyTo && params.replyTo !== params.from;
+            if (hasReplyTo) {
+                // 有 replyTo：同步或异步都返回转发状态
+                if (!result.success) {
+                    return {
+                        content: [{ type: "text", text: `转发失败: ${result.error || '未知错误'}` }],
+                        isError: true,
+                        details: {
+                            status: 'failed',
+                            error: result.error,
+                            routingId,
+                            duration,
+                            target,
+                            replyTo: params.replyTo,
+                            mode: isSyncMode ? 'sync' : 'async'
+                        }
+                    };
+                }
+                // 转发成功（或正在进行中）
+                return {
+                    content: [{ type: "text", text: `已通知 ${target} 执行，结果将转发给 ${params.replyTo}` }],
+                    details: {
+                        status: isSyncMode ? 'forwarded' : 'forwarding',
+                        routingId,
+                        duration,
+                        target,
+                        replyTo: params.replyTo,
+                        mode: isSyncMode ? 'sync' : 'async',
+                        local: result.local
+                    }
+                };
+            }
+            // 无 replyTo：根据同步/异步返回不同结果
             if (isSyncMode) {
                 // 同步模式返回
                 if (result.status === 'timeout') {
@@ -146,7 +179,7 @@ export class WeGirlTools {
                     }
                 };
             }
-            // 异步模式返回
+            // 异步模式返回（无 replyTo）
             if (!result.success) {
                 return {
                     content: [{ type: "text", text: `发送失败: ${result.error || '未知错误'}` }],

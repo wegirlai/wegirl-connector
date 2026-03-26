@@ -380,10 +380,16 @@ const plugin = {
                         throw new Error('Redis not initialized');
                     const { action } = params;
                     const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
+                    // 获取消息上下文信息（用于主动回复）
+                    const routingId = params.routingId;
+                    // replyTo 可能是 string 或 string[]，统一处理为 string
+                    const rawReplyTo = params.replyTo || params.source;
+                    const replyTo = Array.isArray(rawReplyTo) ? rawReplyTo[0] : rawReplyTo;
+                    const isSyncMode = params.timeoutSeconds > 0;
                     let result;
                     switch (action) {
                         case 'create_staff': {
-                            const { message, chatType, source, target, senderName, groupId, routingId } = params;
+                            const { message, chatType, source, target, senderName, groupId } = params;
                             console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, groupId, routingId }));
                             // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
                             // source 保持原样传入，包含 "source:" 或 "source：" 前缀
@@ -425,6 +431,35 @@ const plugin = {
                     // create_staff 已通过 redis 发送消息，返回 null 阻止 deliver
                     if (action === 'create_staff') {
                         return null;
+                    }
+                    // === 主动回复逻辑 ===
+                    // 如果 replyTo 存在且不是自己，主动发送结果给 replyTo
+                    if (replyTo && replyTo !== 'hr' && !replyTo.includes('hr')) {
+                        logger.info(`[hr_manage] 检测到 replyTo=${replyTo}，准备主动发送结果`);
+                        try {
+                            // 动态导入 wegirlSend 避免循环依赖
+                            const { wegirlSend } = await import('./core/send.js');
+                            const replyMessage = formatResultForReply(action, result);
+                            const targetType = replyTo.startsWith('human:') || replyTo.startsWith('source:') || replyTo.startsWith('ou_')
+                                ? 'A2H' : 'A2A';
+                            // 发送给 replyTo
+                            await wegirlSend({
+                                flowType: targetType,
+                                source: 'hr',
+                                target: replyTo.replace(/^human:/, ''), // 移除 human: 前缀
+                                message: replyMessage,
+                                replyTo: replyTo, // 让接收者知道回复给谁
+                                routingId: routingId || `hr-reply-${Date.now()}`,
+                                chatType: 'direct'
+                            }, logger);
+                            logger.info(`[hr_manage] 已主动发送结果给 ${replyTo}`);
+                            // 主动发送后，返回 null 防止再次发送
+                            return null;
+                        }
+                        catch (err) {
+                            logger.error(`[hr_manage] 主动发送失败: ${err.message}`);
+                            // 发送失败，返回正常结果
+                        }
                     }
                     // 返回 OpenClaw 期望的格式
                     return {
@@ -1220,4 +1255,68 @@ async function findOrCreateAgentSession(agentId, runtime, logger) {
 export default plugin;
 // 导出 accounts 相关函数供其他模块使用
 export { getAccount, hasAccount, accountsCache };
+// ============ 结果格式化 ============
+/**
+ * 格式化 hr_manage 结果为易读的回复消息
+ */
+function formatResultForReply(action, result) {
+    switch (action) {
+        case 'list_staffs': {
+            if (!result.success || !result.agents) {
+                return `❌ 获取花名册失败: ${result.error || '未知错误'}`;
+            }
+            const agents = result.agents || [];
+            if (agents.length === 0) {
+                return '📋 团队花名册\n\n暂无成员';
+            }
+            const lines = ['📋 团队花名册', ''];
+            agents.forEach((agent, index) => {
+                const name = agent.name || agent.accountId || 'Unknown';
+                const role = agent.role || '-';
+                const status = agent.status || 'unknown';
+                const caps = (agent.capabilities || []).slice(0, 3).join(', ') || '-';
+                lines.push(`${index + 1}. ${name}`);
+                lines.push(`   角色: ${role} | 状态: ${status}`);
+                if (caps !== '-') {
+                    lines.push(`   能力: ${caps}`);
+                }
+                lines.push('');
+            });
+            lines.push(`共 ${agents.length} 位成员`);
+            return lines.join('\n');
+        }
+        case 'get_staff': {
+            if (!result.success || !result.agent) {
+                return `❌ 获取员工信息失败: ${result.error || '未知错误'}`;
+            }
+            const agent = result.agent;
+            const lines = ['👤 员工信息', ''];
+            lines.push(`工号: ${agent.accountId}`);
+            lines.push(`姓名: ${agent.name}`);
+            lines.push(`状态: ${agent.status}`);
+            if (agent.role)
+                lines.push(`角色: ${agent.role}`);
+            if (agent.instanceId)
+                lines.push(`实例: ${agent.instanceId}`);
+            if (agent.capabilities?.length > 0) {
+                lines.push(`能力: ${agent.capabilities.join(', ')}`);
+            }
+            return lines.join('\n');
+        }
+        case 'sync_agents_to_redis': {
+            if (!result.success) {
+                return `❌ 同步失败: ${result.message}`;
+            }
+            return `✅ ${result.message}`;
+        }
+        case 'send_command': {
+            if (!result.success) {
+                return `❌ 命令发送失败: ${result.error || '未知错误'}`;
+            }
+            return `✅ ${result.message}`;
+        }
+        default:
+            return JSON.stringify(result, null, 2);
+    }
+}
 //# sourceMappingURL=index.js.map

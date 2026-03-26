@@ -358,11 +358,11 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
           return;
         }
 
-        // ========== 同步等待响应回写 ==========
-        // 检查是否有同步等待标记
+        // ========== 获取变量 ==========
         const responseRoutingId = originalMetadata?.responseRoutingId;
         const awaitResponse = originalMetadata?.awaitResponse;
-        
+
+        // ========== 同步等待响应回写（同步模式）==========
         if (awaitResponse && responseRoutingId) {
           try {
             const redis = await getRedisPublisher(cfg);
@@ -384,12 +384,75 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
               });
               
               await redis.lpush(`wegirl:response:${responseRoutingId}`, JSON.stringify(responseData));
-              await redis.expire(`wegirl:response:${responseRoutingId}`, responseTtl); // 使用计算的 TTL
-              log?.info?.(`${logPrefix} Sync response written to Redis: ${responseRoutingId}, TTL=${responseTtl}s`);
+              await redis.expire(`wegirl:response:${responseRoutingId}`, responseTtl);
+              log?.info?.(`${logPrefix} Sync response written to Redis: ${responseRoutingId}`);
             }
           } catch (err: any) {
             log?.error?.(`${logPrefix} Failed to write sync response: ${err.message}`);
           }
+          // 同步模式下继续执行后续转发逻辑（如果有 replyTo）
+        }
+
+        // ========== 转发给 replyTo（同步和异步都支持）==========
+        const originalReplyTo = originalMetadata?.replyTo;
+        const replyToList = Array.isArray(originalReplyTo) ? originalReplyTo : (originalReplyTo ? [originalReplyTo] : []);
+        const validReplyToList = replyToList.filter(r => r && r !== source);
+        
+        if (validReplyToList.length > 0) {
+          log?.info?.(`${logPrefix} Detected ${validReplyToList.length} replyTo targets: ${validReplyToList.join(', ')}`);
+          
+          const forwardResults: { target: string; success: boolean; error?: string }[] = [];
+          
+          for (const replyToTarget of validReplyToList) {
+            try {
+              // 动态导入避免循环依赖
+              const { wegirlSend } = await import('./send.js');
+              
+              const targetType = replyToTarget.startsWith('human:') || 
+                                 replyToTarget.startsWith('source:') || 
+                                 replyToTarget.startsWith('ou_') 
+                ? 'A2H' : 'A2A';
+              
+              await wegirlSend({
+                flowType: targetType,
+                source: target,
+                target: replyToTarget.replace(/^human:/, ''),
+                message: text,
+                routingId: `${routingId}-fwd-${replyToTarget}`,
+                chatType: 'direct',
+                timeoutSeconds: 0  // 转发始终异步
+              }, log);
+              
+              log?.info?.(`${logPrefix} Successfully forwarded to ${replyToTarget}`);
+              forwardResults.push({ target: replyToTarget, success: true });
+            } catch (err: any) {
+              log?.error?.(`${logPrefix} Forward to ${replyToTarget} failed: ${err.message}`);
+              forwardResults.push({ target: replyToTarget, success: false, error: err.message });
+            }
+          }
+          
+          // 如果有失败的，通知 source（调用方）
+          const failedTargets = forwardResults.filter(r => !r.success);
+          if (failedTargets.length > 0) {
+            try {
+              const { wegirlSend } = await import('./send.js');
+              const failedNames = failedTargets.map(t => t.target).join(', ');
+              await wegirlSend({
+                flowType: 'A2A',
+                source: target,
+                target: source,
+                message: `❌ 转发给 [${failedNames}] 失败`,
+                routingId: `${routingId}-err`,
+                chatType: 'direct',
+                timeoutSeconds: 0
+              }, log);
+            } catch (notifyErr: any) {
+              log?.error?.(`${logPrefix} Failed to notify source: ${notifyErr.message}`);
+            }
+          }
+          
+          // 如果有 replyTo，转发完成后不再执行后续默认逻辑
+          return;
         }
 
         // ========== 群聊多 agent 处理 ==========
