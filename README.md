@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.4 (2026-03-29) ⭐ Current
+### v2.1.5 (2026-03-29) ⭐ Current
+
+**调试增强 - Plugin Registered 事件**:
+- ✅ 插件注册成功后发送 `plugin_registered` 事件
+- ✅ 包含 instanceId、agentsRegistered、redisStatus
+- ✅ 用于调试插件初始化时机和防重复注册验证
+
+详见 [MILESTONE-v2.1.5.md](./MILESTONE-v2.1.5.md)
+
+---
+
+### v2.1.4 (2026-03-29)
 
 **Bug 修复 - 防止事件处理器重复注册**:
 - ✅ 添加 `handlersRegistered` 全局标记

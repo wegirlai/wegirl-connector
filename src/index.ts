@@ -240,6 +240,26 @@ const plugin = {
                 }
               }
               logger.info(`[WeGirl register] Agents registered: ${localAgents.length}`);
+              
+              // 发送插件注册成功事件到 wegirl:events
+              if (redisClient && redisClient.status === 'ready') {
+                const eventData = {
+                  id: randomUUID(),
+                  type: 'plugin_registered',
+                  timestamp: Date.now().toString(),
+                  payload: JSON.stringify({
+                    instanceId: INSTANCE_ID,
+                    agentsRegistered: localAgents.length,
+                    redisStatus: redisClient.status,
+                    timestamp: new Date().toISOString()
+                  }),
+                  sessionId: 'global',
+                  userId: 'system',
+                  instanceId: INSTANCE_ID,
+                };
+                await redisClient.publish('wegirl:events', JSON.stringify(eventData));
+                logger.info('[WeGirl register] Plugin registration event sent to wegirl:events');
+              }
             } catch (syncErr: any) {
               logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
             }
