@@ -1,11 +1,19 @@
 // src/event-handlers.ts - OpenClaw 事件处理器注册
 // 事件通过 Pub/Sub 发布到 wegirl:events，不持久化存储
 import { randomUUID } from 'crypto';
+// 全局标记，防止重复注册事件处理器
+let handlersRegistered = false;
 /**
  * 注册所有 OpenClaw 事件处理器
  */
 export function registerEventHandlers(ctx) {
     const { context, logger, pluginConfig, getRedisClient, getRegistry, instanceId } = ctx;
+    // 防止重复注册
+    if (handlersRegistered) {
+        logger.debug('[WeGirl] Event handlers already registered, skipping');
+        return;
+    }
+    handlersRegistered = true;
     const keyPrefix = pluginConfig?.keyPrefix || 'openclaw:events:';
     // Agent 启动时自动注册到 wegirl
     context.on('before_agent_start', async (event) => {

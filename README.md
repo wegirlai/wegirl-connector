@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.1 (2026-03-26) ⭐ Current
+### v2.1.4 (2026-03-29) ⭐ Current
+
+**Bug 修复 - 防止事件处理器重复注册**:
+- ✅ 添加 `handlersRegistered` 全局标记
+- ✅ 解决 channel 多 account 导致的多次初始化问题
+- ✅ 避免重复事件处理和日志输出
+
+详见 [MILESTONE-v2.1.4.md](./MILESTONE-v2.1.4.md)
+
+---
+
+### v2.1.1 (2026-03-26)
 
 **代码重构 - 统一消息构建**:
 - ✅ 提取 `MessageBuilderOptions` 接口到 `utils.ts`
