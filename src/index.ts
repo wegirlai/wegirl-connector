@@ -6,7 +6,7 @@ import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
 import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
-import { registerEventHandlers } from './event-handlers.js';
+import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
 import { executeCreateAgent } from './hr-manage-core.js';
 import { checkIsAgent, handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
@@ -572,7 +572,8 @@ const plugin = {
     // 当收到 target 为 default:{instance} 的消息时，
     // 在 messageRouter 中处理并调用 executeCreateAgent
 
-    // 注册事件处理器 - 使用单独文件
+    // 重置并注册事件处理器 - 使用单独文件
+    resetEventHandlers();
     registerEventHandlers({
       context,
       logger,

@@ -19,13 +19,20 @@ interface EventHandlerContext {
 let handlersRegistered = false;
 
 /**
+ * 重置事件处理器注册状态（用于插件热重载后重新注册）
+ */
+export function resetEventHandlers(): void {
+  handlersRegistered = false;
+}
+
+/**
  * 注册所有 OpenClaw 事件处理器
  */
-export function registerEventHandlers(ctx: EventHandlerContext): void {
+export function registerEventHandlers(ctx: EventHandlerContext, force: boolean = false): void {
   const { context, logger, pluginConfig, getRedisClient, getRegistry, instanceId } = ctx;
-  
-  // 防止重复注册
-  if (handlersRegistered) {
+
+  // 防止重复注册（除非强制重新注册）
+  if (handlersRegistered && !force) {
     logger.debug('[WeGirl] Event handlers already registered, skipping');
     return;
   }

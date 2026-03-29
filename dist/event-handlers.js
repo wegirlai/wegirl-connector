@@ -4,12 +4,18 @@ import { randomUUID } from 'crypto';
 // 全局标记，防止重复注册事件处理器
 let handlersRegistered = false;
 /**
+ * 重置事件处理器注册状态（用于插件热重载后重新注册）
+ */
+export function resetEventHandlers() {
+    handlersRegistered = false;
+}
+/**
  * 注册所有 OpenClaw 事件处理器
  */
-export function registerEventHandlers(ctx) {
+export function registerEventHandlers(ctx, force = false) {
     const { context, logger, pluginConfig, getRedisClient, getRegistry, instanceId } = ctx;
-    // 防止重复注册
-    if (handlersRegistered) {
+    // 防止重复注册（除非强制重新注册）
+    if (handlersRegistered && !force) {
         logger.debug('[WeGirl] Event handlers already registered, skipping');
         return;
     }
