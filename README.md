@@ -24,9 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.6 (2026-03-30) ⭐ Current
+### v2.1.7 (2026-03-30) ⭐ Current
 
-**Bug 修复 - 事件处理器热重载修复**:
+**媒体文件支持 - Agent 图片识别**:
+- ✅ 在消息正文中添加媒体文件路径信息
+- ✅ 通过 `MediaPath`/`MediaType` 参数让 Agent 识别图片
+- ✅ 支持单文件和多文件场景
+
+详见 [MILESTONE-v2.1.7.md](./MILESTONE-v2.1.7.md)
+
+---
+
+### v2.1.6 (2026-03-30)
 - ✅ 添加 `resetEventHandlers()` 函数重置注册状态
 - ✅ 修复热重载后 `before_tool_call`/`after_tool_call` 日志不显示的问题
 - ✅ 解决全局变量缓存导致的重复注册跳过问题
