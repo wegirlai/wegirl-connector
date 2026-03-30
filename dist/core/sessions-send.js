@@ -196,10 +196,39 @@ export async function wegirlSessionsSend(options) {
         // OriginatingChannel/OriginatingTo: 目标渠道，Gateway 会自动路由回复到该渠道
         // 使用 metadata 中的 originatingChannel/originatingTo 设置回复路由
         // 关键：在消息开头嵌入 routingId，让 agent 可以提取使用
-        const messageWithRouting = `[ROUTING_ID:${routingId}]\n${message}`;
+        // 如果有媒体文件，把路径信息也包含在消息中
+        let messageWithRouting = `[ROUTING_ID:${routingId}]\n${message}`;
+        // 添加媒体文件信息到消息中，方便 Agent 读取
+        const mediaFiles = originalMetadata?.mediaFiles;
+        if (mediaFiles && Array.isArray(mediaFiles) && mediaFiles.length > 0) {
+            messageWithRouting += '\n\n[媒体文件]:';
+            for (const media of mediaFiles) {
+                if (media.path) {
+                    messageWithRouting += `\n- ${media.contentType || 'file'}: ${media.path}`;
+                }
+            }
+        }
+        // 构建媒体 payload（用于 Agent 识别图片）
+        let mediaPayload = {};
+        if (mediaFiles && Array.isArray(mediaFiles) && mediaFiles.length > 0) {
+            if (mediaFiles.length === 1) {
+                // 单文件
+                mediaPayload = {
+                    MediaPath: mediaFiles[0].path,
+                    MediaType: mediaFiles[0].contentType || 'application/octet-stream',
+                };
+            }
+            else {
+                // 多文件
+                mediaPayload = {
+                    MediaPaths: mediaFiles.map(m => m.path),
+                    MediaTypes: mediaFiles.map(m => m.contentType || 'application/octet-stream'),
+                };
+            }
+        }
         const inboundCtx = runtime.channel.reply.finalizeInboundContext({
             Body: body,
-            BodyForAgent: messageWithRouting, // 包含 routingId 的消息
+            BodyForAgent: messageWithRouting, // 包含 routingId 和媒体路径的消息
             RawBody: message,
             CommandBody: message,
             From: source,
@@ -223,6 +252,8 @@ export async function wegirlSessionsSend(options) {
             OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
             // 强制指定模型，避免使用默认的 anthropic
             Model: 'kimi-coding/k2p5',
+            // 媒体文件信息（让 Agent 能识别图片）
+            ...mediaPayload,
         });
         log?.info?.(`${logPrefix} dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);
         // 创建 dispatcher，处理 Agent 回复
