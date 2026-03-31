@@ -20,7 +20,7 @@ import {
 } from './utils.js';
 
 const KEY_PREFIX = 'wegirl:';
-const STREAM_PREFIX = `${KEY_PREFIX}stream:instance:`;
+const STREAM_PREFIX = `${KEY_PREFIX}stream:global:`;
 
 /**
  * StaffId 标准化规则：
@@ -448,38 +448,40 @@ export async function wegirlSend(
     
     // 7. 跨实例：写入 Stream
     if (!isLocal) {
-      // 同步模式：传递 timeout 信息
-      const streamData: any = {
-        routingId: ctx.routingId,
+      // 构建完整的消息数据对象
+      const messageData: any = {
         flowType: ctx.flowType,
         source: ctx.source,
         target: ctx.target,
         message: options.message,
         chatType: ctx.chatType,
-        groupId: ctx.groupId || '',
+        groupId: ctx.groupId,
+        routingId: ctx.routingId,
         msgType: options.msgType || 'message',
-        replyTo: JSON.stringify(ctx.replyTo),
-        taskId: ctx.taskId || '',
-        stepId: ctx.stepId || '',
-        stepTotalAgents: ctx.stepTotalAgents?.toString() || '0',
-        timestamp: Date.now().toString(),
+        replyTo: ctx.replyTo,
+        taskId: ctx.taskId,
+        stepId: ctx.stepId,
+        stepTotalAgents: ctx.stepTotalAgents,
+        timestamp: Date.now(),
       };
       
+      // 同步模式：传递 timeout 信息
       if (isSyncMode) {
-        streamData.timeoutSeconds = timeoutSeconds.toString();
-        streamData.awaitResponse = 'true';
+        messageData.timeoutSeconds = timeoutSeconds;
+        messageData.awaitResponse = true;
       }
       
       if (options.payload) {
-        streamData.payload = JSON.stringify(options.payload);
+        messageData.payload = options.payload;
       }
       
-      const entries = Object.entries(streamData).flat() as string[];
+      // 把整个消息作为 JSON 字符串放入 data 字段
+      const streamEntries = ['data', JSON.stringify(messageData)];
       await redis.xadd(
         `${STREAM_PREFIX}${targetInstanceId}`, 
         'MAXLEN', '~', 5000,
         '*', 
-        ...entries
+        ...streamEntries
       );
       
       logger?.info?.(`[WeGirlSend] Cross-instance delivery to ${targetInstanceId}`);

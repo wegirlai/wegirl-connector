@@ -32,14 +32,14 @@ interface SessionsSendOptions {
     log?: any;
 }
 /**
- * 发送消息到 Agent
+ * 发送消息到 Agent (使用 dispatchReplyWithBufferedBlockDispatcher)
  *
- * 流程:
- * 1. 获取 PluginRuntime
- * 2. 使用 resolveAgentRoute 查找 agent
- * 3. 构建 inbound context（设置 OriginatingChannel 用于回复路由）
- * 4. 调用 dispatchReplyFromConfig 发送消息给 Agent
- * 5. Gateway 自动处理 Agent 回复的路由
+ * 标准流程:
+ * 1. resolveAgentRoute → 确定 agent 和 sessionKey
+ * 2. finalizeInboundContext → 构建 ctxPayload
+ * 3. createReplyPrefixOptions → 获取前缀选项 + onModelSelected
+ * 4. dispatchReplyWithBufferedBlockDispatcher → 发送并处理回复
+ * 5. deliver(payload) → 处理 Agent 回复（含 Redis 同步、转发、群聊聚合等）
  */
 export declare function wegirlSessionsSend(options: SessionsSendOptions): Promise<void>;
 export {};

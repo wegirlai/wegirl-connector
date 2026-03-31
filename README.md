@@ -24,7 +24,19 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.7 (2026-03-30) ⭐ Current
+### v2.1.8 (2026-03-31) ⭐ Current
+
+**代码重构与 Bug 修复**:
+- ✅ 使用 `dispatchReplyWithBufferedBlockDispatcher` 标准流程，SDK 自动管理块缓冲和打字指示器
+- ✅ 修复跨实例消息发送格式问题（Stream `data` 字段格式统一）
+- ✅ 修复 Stream key 不一致问题（`stream:instance:` → `stream:global:`）
+- ✅ 保留所有功能：同步等待、replyTo 转发、群聊聚合、媒体支持
+
+详见 [MILESTONE-v2.1.8.md](./MILESTONE-v2.1.8.md)
+
+---
+
+### v2.1.7 (2026-03-30)
 
 **媒体文件支持 - Agent 图片识别**:
 - ✅ 在消息正文中添加媒体文件路径信息
