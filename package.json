@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "wegirl-cli": "./dist/cli.js"
+    "wegirl-cli": "./wegirl-cli.js"
   },
   "files": [
     "dist/",
