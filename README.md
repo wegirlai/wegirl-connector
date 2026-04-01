@@ -24,7 +24,19 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.9 (2026-04-01) ⭐ Current
+### v2.2.0 (2026-04-02) ⭐ Current
+
+**飞书模式重构：独立 Stream 架构**:
+- ✅ 每个 agent 独立监听自己的 Redis Stream（`wegirl:stream:{instanceId}:{accountId}`）
+- ✅ 实现 `monitorWeGirlProvider`，顺序消费消息
+- ✅ 参考飞书插件架构，`gateway.startAccount` 启动独立 monitor
+- ✅ 消除全局 stream 的并发冲突问题
+
+详见 [MILESTONE-v2.2.0.md](./MILESTONE-v2.2.0.md)
+
+---
+
+### v2.1.9 (2026-04-01)
 
 **Health-Monitor 支持与并发修复**:
 - ✅ 实现 `gateway.startAccount/stopAccount`，支持 OpenClaw health-monitor 状态检查

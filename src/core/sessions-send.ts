@@ -1,4 +1,4 @@
-// src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层) - 使用 dispatchReplyWithBufferedBlockDispatcher
+// src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 
 import Redis from 'ioredis';
 import { getWeGirlRuntime } from "../runtime.js";

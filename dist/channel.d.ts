@@ -50,13 +50,13 @@ declare const wegirlPlugin: {
                 linked: boolean;
                 running: boolean;
                 connected: boolean;
+                startedAt: number;
             };
         };
         gateway: {
             /**
              * 启动 channel account（OpenClaw 调用）
-             * 签名: (ctx: AccountContext) => Promise<void>
-             * 注意：不返回 cleanup 函数，让 OpenClaw 通过 stopAccount 停止
+             * 每个 agent 独立监听自己的 Redis Stream
              */
             startAccount(ctx: any): Promise<void>;
             /**

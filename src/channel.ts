@@ -1,7 +1,7 @@
-// src/channel.ts - Channel Plugin 定义（支持 health-monitor）
+// src/channel.ts - Channel Plugin 定义（支持 health-monitor，每个 agent 独立监听 stream）
 
 import { getWeGirlPluginConfig } from './config.js';
-import Redis from 'ioredis';
+import { monitorWeGirlProvider } from './monitor.js';
 
 // 全局状态跟踪
 const channelStates = new Map<string, {
@@ -55,32 +55,6 @@ async function stopChannel(accountId: string, log?: any): Promise<void> {
   log?.info?.(`[WeGirl:${accountId}] Channel stopped`);
 }
 
-/**
- * 检查 Redis 连接
- */
-async function checkRedisConnection(log?: any): Promise<boolean> {
-  try {
-    const pluginCfg = getWeGirlPluginConfig();
-    const redis = new Redis({
-      host: pluginCfg?.redisHost || 'localhost',
-      port: pluginCfg?.redisPort || 6379,
-      password: pluginCfg?.redisPassword,
-      db: pluginCfg?.redisDb ?? 1,
-      connectTimeout: 3000,
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-    });
-    
-    await redis.connect();
-    await redis.ping();
-    await redis.disconnect();
-    return true;
-  } catch (err: any) {
-    log?.error?.(`[WeGirl] Redis check failed:`, err.message);
-    return false;
-  }
-}
-
 const wegirlPlugin = {
   plugin: {
     id: "wegirl",
@@ -126,15 +100,15 @@ const wegirlPlugin = {
       isConfigured: (account: any) => !!account?.accountId,
 
       describeAccount: (e: any) => {
-        // 总是返回 running=true，因为 wegirl 是 ephemeral channel
-        // 实际的消息处理在 register() 中全局处理
+        const state = getChannelState(e.accountId);
         return {
           accountId: e.accountId,
           enabled: e?.enabled !== false,
           configured: !!e?.accountId,
-          linked: true,
-          running: true,  // 告诉 health-monitor channel 是健康的
-          connected: true,
+          linked: state.running,
+          running: state.running,
+          connected: state.connected,
+          startedAt: state.startedAt,
         };
       }
     },
@@ -143,24 +117,26 @@ const wegirlPlugin = {
     gateway: {
       /**
        * 启动 channel account（OpenClaw 调用）
-       * 签名: (ctx: AccountContext) => Promise<void>
-       * 注意：不返回 cleanup 函数，让 OpenClaw 通过 stopAccount 停止
+       * 每个 agent 独立监听自己的 Redis Stream
        */
       async startAccount(ctx: any) {
         const accountId = ctx?.account?.accountId || 'default';
         const log = ctx?.log;
+        const abortSignal = ctx?.abortSignal;
         
-        log?.info?.(`[WeGirl:${accountId}] Gateway starting channel...`);
+        log?.info?.(`[WeGirl:${accountId}] Gateway starting monitor...`);
         
-        try {
-          await startChannel(accountId, log);
-          log?.info?.(`[WeGirl:${accountId}] Channel started successfully`);
-          // 不返回任何值，OpenClaw 会自动设置 running: true
-        } catch (err: any) {
-          log?.error?.(`[WeGirl:${accountId}] Gateway start failed:`, err.message);
-          // 抛出错误，让 OpenClaw 知道启动失败
-          throw err;
-        }
+        const pluginCfg = getWeGirlPluginConfig();
+        const instanceId = pluginCfg?.instanceId || 'instance-local';
+        
+        // 启动 monitor（每个 agent 独立监听自己的 stream）
+        return monitorWeGirlProvider({
+          accountId,
+          instanceId,
+          cfg: ctx.cfg,
+          abortSignal,
+          log
+        });
       },
 
       /**
