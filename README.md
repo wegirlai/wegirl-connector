@@ -24,7 +24,19 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.1.8 (2026-03-31) ⭐ Current
+### v2.1.9 (2026-04-01) ⭐ Current
+
+**Health-Monitor 支持与并发修复**:
+- ✅ 实现 `gateway.startAccount/stopAccount`，支持 OpenClaw health-monitor 状态检查
+- ✅ `describeAccount` 返回 `running: true`，避免 channel 被误判为 stopped
+- ✅ 添加 Agent 级消息队列，串行处理消息避免并发冲突
+- ✅ 修复 OpenClaw 2026.2.24 动态模块加载竞态条件
+
+详见 [MILESTONE-v2.1.9.md](./MILESTONE-v2.1.9.md)
+
+---
+
+### v2.1.8 (2026-03-31)
 
 **代码重构与 Bug 修复**:
 - ✅ 使用 `dispatchReplyWithBufferedBlockDispatcher` 标准流程，SDK 自动管理块缓冲和打字指示器

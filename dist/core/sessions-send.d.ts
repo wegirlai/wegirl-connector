@@ -32,14 +32,7 @@ interface SessionsSendOptions {
     log?: any;
 }
 /**
- * 发送消息到 Agent (使用 dispatchReplyWithBufferedBlockDispatcher)
- *
- * 标准流程:
- * 1. resolveAgentRoute → 确定 agent 和 sessionKey
- * 2. finalizeInboundContext → 构建 ctxPayload
- * 3. createReplyPrefixOptions → 获取前缀选项 + onModelSelected
- * 4. dispatchReplyWithBufferedBlockDispatcher → 发送并处理回复
- * 5. deliver(payload) → 处理 Agent 回复（含 Redis 同步、转发、群聊聚合等）
+ * 发送消息到 Agent (使用队列机制避免 session 锁冲突)
  */
 export declare function wegirlSessionsSend(options: SessionsSendOptions): Promise<void>;
 export {};
