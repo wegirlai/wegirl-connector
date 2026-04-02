@@ -32,7 +32,7 @@ interface SessionsSendOptions {
     log?: any;
 }
 /**
- * 发送消息到 Agent (使用队列机制避免 session 锁冲突)
+ * 发送消息到 Agent (直接调用，由 Stream 消费保证顺序)
  */
 export declare function wegirlSessionsSend(options: SessionsSendOptions): Promise<void>;
 export {};

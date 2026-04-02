@@ -6,100 +6,6 @@ import { createReplyPrefixOptions, resolveOutboundMediaUrls } from "openclaw/plu
 // Redis 连接缓存
 let redisClient = null;
 let redisConnectPromise = null;
-const agentQueues = new Map();
-const agentProcessing = new Map();
-// ========== Session 锁等待机制 ==========
-import * as fs from 'fs';
-import * as path from 'path';
-/**
- * 获取 agent 的 session lock 文件路径
- */
-function getSessionLockPath(agentId) {
-    // 从 openclaw.json 或环境变量获取 workspace 路径
-    const workspaceBase = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw';
-    return path.join(workspaceBase, 'agents', agentId, 'sessions', '*.jsonl.lock');
-}
-/**
- * 检查是否有 session lock 文件存在
- */
-async function hasSessionLock(agentId) {
-    try {
-        const workspaceBase = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw';
-        const sessionsDir = path.join(workspaceBase, 'agents', agentId, 'sessions');
-        if (!fs.existsSync(sessionsDir)) {
-            return false;
-        }
-        const files = fs.readdirSync(sessionsDir);
-        return files.some(f => f.endsWith('.jsonl.lock'));
-    }
-    catch {
-        return false;
-    }
-}
-/**
- * 等待 session lock 释放（带超时）
- */
-async function waitForSessionLock(agentId, maxWaitMs = 30000, log) {
-    const startTime = Date.now();
-    const checkInterval = 500; // 每 500ms 检查一次
-    while (Date.now() - startTime < maxWaitMs) {
-        const hasLock = await hasSessionLock(agentId);
-        if (!hasLock) {
-            return true; // Lock 已释放
-        }
-        log?.debug?.(`[SessionLock] ${agentId} is locked, waiting... (${Date.now() - startTime}ms)`);
-        await new Promise(resolve => setTimeout(resolve, checkInterval));
-    }
-    log?.warn?.(`[SessionLock] Timeout waiting for ${agentId} after ${maxWaitMs}ms`);
-    return false; // 超时
-}
-async function processAgentQueue(target, log) {
-    const queue = agentQueues.get(target);
-    if (!queue || queue.length === 0) {
-        agentProcessing.set(target, false);
-        return;
-    }
-    agentProcessing.set(target, true);
-    const next = queue.shift();
-    if (!next) {
-        agentProcessing.set(target, false);
-        return;
-    }
-    try {
-        // 等待 session lock 释放
-        log?.info?.(`[AgentQueue] Waiting for ${target} session lock...`);
-        const lockReleased = await waitForSessionLock(target, 30000, log);
-        if (!lockReleased) {
-            throw new Error(`Session lock timeout for ${target}`);
-        }
-        log?.info?.(`[AgentQueue] Processing message for ${target}, queue length: ${queue.length}`);
-        await processMessage(next.options);
-        next.resolve();
-    }
-    catch (err) {
-        log?.error?.(`[AgentQueue] Failed to process message for ${target}: ${err.message}`);
-        next.reject(err);
-    }
-    finally {
-        // 给一个短暂的延迟，确保 OpenClaw 完全释放锁
-        await new Promise(resolve => setTimeout(resolve, 100));
-        // 继续处理队列中的下一个
-        setImmediate(() => processAgentQueue(target, log));
-    }
-}
-async function enqueueMessage(options) {
-    const { target, log } = options;
-    return new Promise((resolve, reject) => {
-        const queue = agentQueues.get(target) || [];
-        queue.push({ options, resolve, reject });
-        agentQueues.set(target, queue);
-        log?.info?.(`[AgentQueue] Enqueued message for ${target}, queue length: ${queue.length}`);
-        // 如果没有正在处理的消息，开始处理
-        if (!agentProcessing.get(target)) {
-            processAgentQueue(target, log);
-        }
-    });
-}
 async function getRedisPublisher(cfg) {
     if (redisClient && redisClient.status === 'ready') {
         return redisClient;
@@ -488,10 +394,10 @@ async function handleAgentReply(params) {
     }
 }
 /**
- * 发送消息到 Agent (使用队列机制避免 session 锁冲突)
+ * 发送消息到 Agent (直接调用，由 Stream 消费保证顺序)
  */
 export async function wegirlSessionsSend(options) {
-    return enqueueMessage(options);
+    return processMessage(options);
 }
 /**
  * 实际处理消息的函数 (原 wegirlSessionsSend 逻辑)

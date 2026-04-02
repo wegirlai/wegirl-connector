@@ -47,122 +47,6 @@ interface SessionsSendOptions {
 let redisClient: Redis | null = null;
 let redisConnectPromise: Promise<Redis> | null = null;
 
-// ========== Agent 消息队列 ==========
-interface QueuedMessage {
-  options: SessionsSendOptions;
-  resolve: (value: void) => void;
-  reject: (reason: any) => void;
-}
-
-const agentQueues: Map<string, QueuedMessage[]> = new Map();
-const agentProcessing: Map<string, boolean> = new Map();
-
-// ========== Session 锁等待机制 ==========
-import * as fs from 'fs';
-import * as path from 'path';
-
-/**
- * 获取 agent 的 session lock 文件路径
- */
-function getSessionLockPath(agentId: string): string {
-  // 从 openclaw.json 或环境变量获取 workspace 路径
-  const workspaceBase = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw';
-  return path.join(workspaceBase, 'agents', agentId, 'sessions', '*.jsonl.lock');
-}
-
-/**
- * 检查是否有 session lock 文件存在
- */
-async function hasSessionLock(agentId: string): Promise<boolean> {
-  try {
-    const workspaceBase = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw';
-    const sessionsDir = path.join(workspaceBase, 'agents', agentId, 'sessions');
-    
-    if (!fs.existsSync(sessionsDir)) {
-      return false;
-    }
-    
-    const files = fs.readdirSync(sessionsDir);
-    return files.some(f => f.endsWith('.jsonl.lock'));
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 等待 session lock 释放（带超时）
- */
-async function waitForSessionLock(agentId: string, maxWaitMs: number = 30000, log?: any): Promise<boolean> {
-  const startTime = Date.now();
-  const checkInterval = 500; // 每 500ms 检查一次
-  
-  while (Date.now() - startTime < maxWaitMs) {
-    const hasLock = await hasSessionLock(agentId);
-    if (!hasLock) {
-      return true; // Lock 已释放
-    }
-    
-    log?.debug?.(`[SessionLock] ${agentId} is locked, waiting... (${Date.now() - startTime}ms)`);
-    await new Promise(resolve => setTimeout(resolve, checkInterval));
-  }
-  
-  log?.warn?.(`[SessionLock] Timeout waiting for ${agentId} after ${maxWaitMs}ms`);
-  return false; // 超时
-}
-
-async function processAgentQueue(target: string, log?: any): Promise<void> {
-  const queue = agentQueues.get(target);
-  if (!queue || queue.length === 0) {
-    agentProcessing.set(target, false);
-    return;
-  }
-
-  agentProcessing.set(target, true);
-  const next = queue.shift();
-  if (!next) {
-    agentProcessing.set(target, false);
-    return;
-  }
-
-  try {
-    // 等待 session lock 释放
-    log?.info?.(`[AgentQueue] Waiting for ${target} session lock...`);
-    const lockReleased = await waitForSessionLock(target, 30000, log);
-    if (!lockReleased) {
-      throw new Error(`Session lock timeout for ${target}`);
-    }
-    
-    log?.info?.(`[AgentQueue] Processing message for ${target}, queue length: ${queue.length}`);
-    await processMessage(next.options);
-    next.resolve();
-  } catch (err: any) {
-    log?.error?.(`[AgentQueue] Failed to process message for ${target}: ${err.message}`);
-    next.reject(err);
-  } finally {
-    // 给一个短暂的延迟，确保 OpenClaw 完全释放锁
-    await new Promise(resolve => setTimeout(resolve, 100));
-    // 继续处理队列中的下一个
-    setImmediate(() => processAgentQueue(target, log));
-  }
-}
-
-async function enqueueMessage(options: SessionsSendOptions): Promise<void> {
-  const { target, log } = options;
-  
-  return new Promise((resolve, reject) => {
-    const queue = agentQueues.get(target) || [];
-    queue.push({ options, resolve, reject });
-    agentQueues.set(target, queue);
-    
-    log?.info?.(`[AgentQueue] Enqueued message for ${target}, queue length: ${queue.length}`);
-    
-    // 如果没有正在处理的消息，开始处理
-    if (!agentProcessing.get(target)) {
-      processAgentQueue(target, log);
-    }
-  });
-}
-
 async function getRedisPublisher(cfg: any): Promise<Redis> {
   if (redisClient && redisClient.status === 'ready') {
     return redisClient;
@@ -604,10 +488,10 @@ async function handleAgentReply(params: {
 }
 
 /**
- * 发送消息到 Agent (使用队列机制避免 session 锁冲突)
+ * 发送消息到 Agent (直接调用，由 Stream 消费保证顺序)
  */
 export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<void> {
-  return enqueueMessage(options);
+  return processMessage(options);
 }
 
 /**
