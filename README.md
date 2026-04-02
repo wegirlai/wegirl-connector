@@ -26,11 +26,12 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ### v2.2.0 (2026-04-02) ⭐ Current
 
-**飞书模式重构：独立 Stream 架构**:
-- ✅ 每个 agent 独立监听自己的 Redis Stream（`wegirl:stream:{instanceId}:{accountId}`）
-- ✅ 实现 `monitorWeGirlProvider`，顺序消费消息
-- ✅ 参考飞书插件架构，`gateway.startAccount` 启动独立 monitor
-- ✅ 消除全局 stream 的并发冲突问题
+**独立 Stream 架构 + 并发控制简化**:
+- ✅ 每个 agent 拥有独立的 Redis Stream（`wegirl:stream:{instanceId}:{accountId}`）
+- ✅ 天然顺序消费：单 Stream + 单消费者组 = 严格顺序保证
+- ✅ 移除冗余内存队列和 Session Lock 机制（-110 行代码）
+- ✅ OpenClaw 内部自动串行化，无需额外并发控制
+- ✅ 消息只被目标 agent 读取一次（消除 N 倍广播浪费）
 
 详见 [MILESTONE-v2.2.0.md](./MILESTONE-v2.2.0.md)
 
