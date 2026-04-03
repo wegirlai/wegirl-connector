@@ -151,6 +151,63 @@ const wegirlPlugin = {
         await stopChannel(accountId, log);
       }
     },
+
+    // Outbound 投递器 - 处理 Agent 回复的消息
+    outbound: {
+      // 投递模式：direct = 同步投递，queued = 异步队列
+      deliveryMode: 'direct' as const,
+
+      /**
+       * 发送文本消息
+       * 对于 wegirl channel，消息通过 Redis Stream 内部流转
+       */
+      async sendText(params: {
+        text: string;
+        to: string;
+        conversationId: string;
+        sessionId?: string;
+        accountId?: string;
+        metadata?: any;
+      }) {
+        const { text, to, accountId } = params;
+        
+        // wegirl 是内部 channel，消息通过 Redis Stream 处理
+        // 这里只需要返回成功，实际的投递在 session-send.ts 中完成
+        return {
+          ok: true,
+          messageId: `wegirl-${Date.now()}`,
+        };
+      },
+
+      /**
+       * 发送卡片消息（可选）
+       */
+      async sendCard(params: {
+        card: any;
+        to: string;
+        conversationId: string;
+        sessionId?: string;
+        accountId?: string;
+      }) {
+        return {
+          ok: true,
+          messageId: `wegirl-card-${Date.now()}`,
+        };
+      },
+
+      /**
+       * 更新消息（可选）
+       */
+      async updateMessage(params: {
+        messageId: string;
+        content: any;
+        conversationId: string;
+      }) {
+        return {
+          ok: true,
+        };
+      }
+    },
   }
 };
 

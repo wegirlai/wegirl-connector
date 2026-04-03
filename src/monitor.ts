@@ -19,9 +19,9 @@ interface MonitorParams {
 export async function monitorWeGirlProvider(params: MonitorParams): Promise<void> {
   const { accountId, instanceId, cfg, abortSignal, log } = params;
   
-  // 每个 agent 独立的 stream key
+  // 每个 agent 独立的 stream key 和消费者组
   const streamKey = `wegirl:stream:${instanceId}:${accountId}`;
-  const consumerGroup = `wegirl-consumers-${instanceId}`;
+  const consumerGroup = `wegirl-consumers-${instanceId}-${accountId}`;  // 每个 agent 独立的消费者组
   const consumerName = `${accountId}-${Date.now()}`;
   
   log?.info?.(`[WeGirl:${accountId}] Starting monitor for stream: ${streamKey}`);

@@ -185,7 +185,7 @@ export interface PendingItem {
 
 // wegirl_send 工具参数
 export interface WeGirlSendParams {
-  target: string;  // 支持多种格式：agent:xxx, human:xxx, capability:xxx, workflow:xxx
+  target: string;  // 支持多种格式：agent:xxx, capability:xxx, workflow:xxx, ou_xxx, source:xxx
   message: string;
   context?: {
     workflowId?: string;

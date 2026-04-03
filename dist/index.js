@@ -345,14 +345,41 @@ const plugin = {
             // HR Manage Tool - 仅限 HR Agent 使用
             context.registerTool({
                 name: 'hr_manage',
-                description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 同步本地信息到 Redis 使用 sync_agents_to_redis。',
+                description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 同步本地信息到 Redis 使用 sync_agents_to_redis。',
                 parameters: {
                     type: 'object',
                     properties: {
                         action: {
                             type: 'string',
-                            enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff'],
+                            enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff', 'update_agent_profile', 'get_agent_profile'],
                             description: '操作类型'
+                        },
+                        // 用于 get_staff, get_agent_profile, update_agent_profile
+                        accountId: {
+                            type: 'string',
+                            description: 'Agent ID（get_staff/get_agent_profile/update_agent_profile 时使用）'
+                        },
+                        // 用于 update_agent_profile
+                        profile: {
+                            type: 'object',
+                            description: 'Agent 档案（update_agent_profile 时使用）',
+                            properties: {
+                                name: { type: 'string', description: '显示名称' },
+                                description: { type: 'string', description: '职责描述' },
+                                personality: {
+                                    type: 'object',
+                                    description: '性格配置',
+                                    properties: {
+                                        vibe: { type: 'string', description: '整体风格' },
+                                        traits: { type: 'array', items: { type: 'string' }, description: '性格特质' },
+                                        emoji: { type: 'string', description: '代表表情' },
+                                        voice: { type: 'string', description: '语音风格' },
+                                        style: { type: 'string', description: '沟通风格' }
+                                    }
+                                },
+                                capabilities: { type: 'array', items: { type: 'string' }, description: '能力标签' },
+                                workspace: { type: 'string', description: '工作空间路径' }
+                            }
                         },
                         payload: {
                             type: 'object',
@@ -432,6 +459,12 @@ const plugin = {
                         case 'get_staff':
                             result = await handleGetAgent(params, redisClient, logger);
                             break;
+                        case 'get_agent_profile':
+                            result = await handleGetAgentProfile(params, redisClient, logger);
+                            break;
+                        case 'update_agent_profile':
+                            result = await handleUpdateAgentProfile(params, redisClient, logger);
+                            break;
                         case 'sync_agents_to_redis':
                             result = await handleSyncAgents(redisClient, logger);
                             break;
@@ -459,15 +492,15 @@ const plugin = {
                             // 动态导入 wegirlSend 避免循环依赖
                             const { wegirlSend } = await import('./core/send.js');
                             const replyMessage = formatResultForReply(action, result);
-                            const targetType = replyTo.startsWith('human:') || replyTo.startsWith('source:') || replyTo.startsWith('ou_')
+                            const targetType = replyTo.startsWith('source:') || replyTo.startsWith('ou_')
                                 ? 'A2H' : 'A2A';
                             // 发送给 replyTo
                             await wegirlSend({
                                 flowType: targetType,
                                 source: 'hr',
-                                target: replyTo.replace(/^human:/, ''), // 移除 human: 前缀
+                                target: replyTo,
                                 message: replyMessage,
-                                replyTo: replyTo, // 让接收者知道回复给谁
+                                replyTo: replyTo,
                                 routingId: routingId || `hr-reply-${Date.now()}`,
                                 chatType: 'direct'
                             }, logger);
@@ -735,12 +768,32 @@ async function handleListAgents(redis, logger) {
     const KEY_PREFIX = 'wegirl:';
     // 获取所有 staff，过滤出 agent 类型
     const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
-    const staffKeys = keys.filter(k => !k.includes(':by-type:') && !k.includes(':capability:'));
+    const staffKeys = keys.filter(k => !k.includes(':by-type:') && !k.includes(':capability:') && !k.includes(':personality:'));
     const agents = await Promise.all(staffKeys.map(async (key) => {
         const data = await redis.hgetall(key);
         // 只返回 agent 类型
         if (data.type !== 'agent')
             return null;
+        // 解析性格和能力
+        let personalityVibe = '-';
+        let capabilities = [];
+        try {
+            if (data.personality) {
+                const p = JSON.parse(data.personality);
+                personalityVibe = p.vibe || p.style || '-';
+            }
+        }
+        catch (e) {
+            // ignore
+        }
+        try {
+            if (data.capabilities) {
+                capabilities = JSON.parse(data.capabilities);
+            }
+        }
+        catch (e) {
+            capabilities = data.capabilities?.split(',').filter(Boolean) || [];
+        }
         return {
             accountId: data.staffId,
             name: data.name,
@@ -748,7 +801,9 @@ async function handleListAgents(redis, logger) {
             role: data.role || '-',
             instanceId: data.instanceId,
             status: data.status,
-            capabilities: data.capabilities?.split(',') || [],
+            personalityVibe,
+            capabilities: capabilities.slice(0, 3), // 只显示前3个能力
+            capabilityCount: capabilities.length,
             lastHeartbeat: data.lastHeartbeat
         };
     }));
@@ -783,6 +838,153 @@ async function handleGetAgent(args, redis, logger) {
                 pendingTasks: parseInt(data['load:pendingTasks'] || '0')
             }
         }
+    };
+}
+/**
+ * 获取 Agent 详细档案（包括性格和能力）
+ */
+async function handleGetAgentProfile(args, redis, logger) {
+    const { accountId } = args;
+    if (!accountId) {
+        return { success: false, error: '缺少必填参数: accountId' };
+    }
+    logger.info(`[hr_manage] Getting agent profile: ${accountId}`);
+    const KEY_PREFIX = 'wegirl:';
+    const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
+    if (!data.staffId) {
+        return { success: false, error: `Agent not found: ${accountId}` };
+    }
+    // 解析 JSON 字段
+    let personality = {};
+    let capabilities = [];
+    try {
+        if (data.personality) {
+            personality = JSON.parse(data.personality);
+        }
+    }
+    catch (e) {
+        logger.warn(`[hr_manage] Failed to parse personality for ${accountId}`);
+    }
+    try {
+        if (data.capabilities) {
+            capabilities = JSON.parse(data.capabilities);
+        }
+    }
+    catch (e) {
+        // 兼容旧格式（逗号分隔）
+        capabilities = data.capabilities?.split(',').filter(Boolean) || [];
+    }
+    return {
+        success: true,
+        agent: {
+            accountId: data.staffId,
+            name: data.name,
+            type: data.type,
+            instanceId: data.instanceId,
+            status: data.status,
+            description: data.description || '',
+            workspace: data.workspace || '',
+            personality,
+            capabilities,
+            metadata: {
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+                version: data.version || '1.0'
+            },
+            lastHeartbeat: data.lastHeartbeat
+        }
+    };
+}
+/**
+ * 更新 Agent 档案（性格、能力等）
+ */
+async function handleUpdateAgentProfile(args, redis, logger) {
+    const { accountId, profile } = args;
+    if (!accountId) {
+        return { success: false, error: '缺少必填参数: accountId' };
+    }
+    if (!profile || typeof profile !== 'object') {
+        return { success: false, error: '缺少必填参数: profile' };
+    }
+    logger.info(`[hr_manage] Updating agent profile: ${accountId}`);
+    const KEY_PREFIX = 'wegirl:';
+    const key = `${KEY_PREFIX}staff:${accountId}`;
+    // 检查 agent 是否存在
+    const exists = await redis.exists(key);
+    if (!exists) {
+        return { success: false, error: `Agent not found: ${accountId}` };
+    }
+    const pipeline = redis.pipeline();
+    const now = Date.now().toString();
+    // 更新基本字段
+    if (profile.name !== undefined) {
+        pipeline.hset(key, 'name', profile.name);
+    }
+    if (profile.description !== undefined) {
+        pipeline.hset(key, 'description', profile.description);
+    }
+    if (profile.workspace !== undefined) {
+        pipeline.hset(key, 'workspace', profile.workspace);
+    }
+    // 更新性格（JSON 存储）
+    if (profile.personality !== undefined) {
+        pipeline.hset(key, 'personality', JSON.stringify(profile.personality));
+        // 更新性格标签索引
+        if (profile.personality.traits && Array.isArray(profile.personality.traits)) {
+            // 先获取旧的 personality 以清理旧索引
+            const oldData = await redis.hget(key, 'personality');
+            let oldTraits = [];
+            try {
+                const oldPersonality = JSON.parse(oldData || '{}');
+                oldTraits = oldPersonality.traits || [];
+            }
+            catch (e) {
+                // ignore
+            }
+            // 移除旧的性格索引
+            for (const trait of oldTraits) {
+                pipeline.srem(`${KEY_PREFIX}personality:${trait}`, accountId);
+            }
+            // 添加新的性格索引
+            for (const trait of profile.personality.traits) {
+                if (trait) {
+                    pipeline.sadd(`${KEY_PREFIX}personality:${trait}`, accountId);
+                }
+            }
+        }
+    }
+    // 更新能力（JSON 数组存储）
+    if (profile.capabilities !== undefined && Array.isArray(profile.capabilities)) {
+        // 获取旧的能力以清理索引
+        const oldCapsData = await redis.hget(key, 'capabilities');
+        let oldCaps = [];
+        try {
+            oldCaps = JSON.parse(oldCapsData || '[]');
+        }
+        catch (e) {
+            oldCaps = oldCapsData?.split(',').filter(Boolean) || [];
+        }
+        // 移除旧的能力索引
+        for (const cap of oldCaps) {
+            pipeline.srem(`${KEY_PREFIX}capability:${cap}`, accountId);
+        }
+        // 添加新的能力索引
+        for (const cap of profile.capabilities) {
+            if (cap) {
+                pipeline.sadd(`${KEY_PREFIX}capability:${cap}`, accountId);
+            }
+        }
+        pipeline.hset(key, 'capabilities', JSON.stringify(profile.capabilities));
+    }
+    // 更新时间戳
+    pipeline.hset(key, 'updatedAt', now);
+    await pipeline.exec();
+    logger.info(`[hr_manage] Agent profile updated: ${accountId}`);
+    return {
+        success: true,
+        message: `Agent ${accountId} profile updated successfully`,
+        accountId,
+        updatedAt: now
     };
 }
 /**
@@ -1292,13 +1494,13 @@ function formatResultForReply(action, result) {
             const lines = ['📋 团队花名册', ''];
             agents.forEach((agent, index) => {
                 const name = agent.name || agent.accountId || 'Unknown';
-                const role = agent.role || '-';
                 const status = agent.status || 'unknown';
-                const caps = (agent.capabilities || []).slice(0, 3).join(', ') || '-';
-                lines.push(`${index + 1}. ${name}`);
-                lines.push(`   角色: ${role} | 状态: ${status}`);
+                const vibe = agent.personalityVibe || '-';
+                const caps = (agent.capabilities || []).join(', ') || '-';
+                lines.push(`${index + 1}. ${name} | ${status}`);
+                lines.push(`   风格: ${vibe}`);
                 if (caps !== '-') {
-                    lines.push(`   能力: ${caps}`);
+                    lines.push(`   能力: ${caps}${agent.capabilityCount > 3 ? ` (+${agent.capabilityCount - 3})` : ''}`);
                 }
                 lines.push('');
             });
@@ -1314,14 +1516,55 @@ function formatResultForReply(action, result) {
             lines.push(`工号: ${agent.accountId}`);
             lines.push(`姓名: ${agent.name}`);
             lines.push(`状态: ${agent.status}`);
-            if (agent.role)
-                lines.push(`角色: ${agent.role}`);
             if (agent.instanceId)
                 lines.push(`实例: ${agent.instanceId}`);
             if (agent.capabilities?.length > 0) {
                 lines.push(`能力: ${agent.capabilities.join(', ')}`);
             }
             return lines.join('\n');
+        }
+        case 'get_agent_profile': {
+            if (!result.success || !result.agent) {
+                return `❌ 获取档案失败: ${result.error || '未知错误'}`;
+            }
+            const agent = result.agent;
+            const lines = ['📋 Agent 档案', ''];
+            lines.push(`工号: ${agent.accountId}`);
+            lines.push(`姓名: ${agent.name}`);
+            lines.push(`状态: ${agent.status}`);
+            if (agent.description)
+                lines.push(`职责: ${agent.description}`);
+            // 性格
+            if (agent.personality && Object.keys(agent.personality).length > 0) {
+                lines.push('');
+                lines.push('🎭 性格:');
+                const p = agent.personality;
+                if (p.vibe)
+                    lines.push(`  风格: ${p.vibe}`);
+                if (p.traits?.length > 0)
+                    lines.push(`  特质: ${p.traits.join(', ')}`);
+                if (p.emoji)
+                    lines.push(`  表情: ${p.emoji}`);
+                if (p.voice)
+                    lines.push(`  语音: ${p.voice}`);
+                if (p.style)
+                    lines.push(`  沟通: ${p.style}`);
+            }
+            // 能力
+            if (agent.capabilities?.length > 0) {
+                lines.push('');
+                lines.push('⚡ 能力:');
+                agent.capabilities.forEach((cap, i) => {
+                    lines.push(`  ${i + 1}. ${cap}`);
+                });
+            }
+            return lines.join('\n');
+        }
+        case 'update_agent_profile': {
+            if (!result.success) {
+                return `❌ 更新失败: ${result.error || '未知错误'}`;
+            }
+            return `✅ ${result.message}`;
         }
         case 'sync_agents_to_redis': {
             if (!result.success) {

@@ -65,6 +65,47 @@ declare const wegirlPlugin: {
              */
             stopAccount(ctx: any): Promise<void>;
         };
+        outbound: {
+            deliveryMode: "direct";
+            /**
+             * 发送文本消息
+             * 对于 wegirl channel，消息通过 Redis Stream 内部流转
+             */
+            sendText(params: {
+                text: string;
+                to: string;
+                conversationId: string;
+                sessionId?: string;
+                accountId?: string;
+                metadata?: any;
+            }): Promise<{
+                ok: boolean;
+                messageId: string;
+            }>;
+            /**
+             * 发送卡片消息（可选）
+             */
+            sendCard(params: {
+                card: any;
+                to: string;
+                conversationId: string;
+                sessionId?: string;
+                accountId?: string;
+            }): Promise<{
+                ok: boolean;
+                messageId: string;
+            }>;
+            /**
+             * 更新消息（可选）
+             */
+            updateMessage(params: {
+                messageId: string;
+                content: any;
+                conversationId: string;
+            }): Promise<{
+                ok: boolean;
+            }>;
+        };
     };
 };
 export { wegirlPlugin, channelStates, startChannel, stopChannel };

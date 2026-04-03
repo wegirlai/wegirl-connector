@@ -114,9 +114,10 @@ export class MessageRouter {
     // 发送回调消息
     async sendReply(target, message) {
         try {
-            // 解析 target: "agent:hr" 或 "human:user123"
-            const [type, id] = target.split(':');
-            if (type === 'agent') {
+            // 解析 target: 直接通过查询 Redis 判断类型
+            const staffData = await this.redis.hgetall(`${KEY_PREFIX}staff:${target}`);
+            const targetType = staffData.type || 'unknown';
+            if (targetType === 'agent') {
                 // 发送给 agent - 通过 Stream
                 const replyEnvelope = {
                     type: 'response',
@@ -125,14 +126,14 @@ export class MessageRouter {
                         timestamp: Date.now()
                     },
                     from: { type: 'agent', agentId: `default:${this.options.instanceId}` },
-                    to: { type: 'agent', agentId: id },
+                    to: { type: 'agent', agentId: target },
                     payload: { content: JSON.stringify(message), format: 'json' }
                 };
                 await this.redis.xadd(`${KEY_PREFIX}messages`, '*', 'data', JSON.stringify(replyEnvelope));
             }
-            else if (type === 'human') {
+            else if (targetType === 'human') {
                 // 发送给 human - 通过待办队列
-                await this.redis.zadd(`${KEY_PREFIX}pending:${id}`, Date.now(), JSON.stringify({
+                await this.redis.zadd(`${KEY_PREFIX}pending:${target}`, Date.now(), JSON.stringify({
                     type: 'notification',
                     content: message,
                     timestamp: Date.now()

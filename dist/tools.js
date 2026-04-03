@@ -18,9 +18,6 @@ export class WeGirlTools {
         if (target.startsWith('agent:')) {
             return { mode: 'agent', agentId: target.slice(6) };
         }
-        if (target.startsWith('human:')) {
-            return { mode: 'human', userId: target.slice(6) };
-        }
         if (target.startsWith('capability:')) {
             const parts = target.split(':');
             return { mode: 'capability', capability: parts[1], strategy: parts[2] || 'least-load' };
@@ -32,11 +29,11 @@ export class WeGirlTools {
         if (target === 'broadcast') {
             return { mode: 'broadcast' };
         }
-        // 人类用户ID (ou_ 开头)
-        if (target.startsWith('ou_')) {
+        // 人类用户ID (ou_ 开头或 source: 前缀)
+        if (target.startsWith('ou_') || target.startsWith('source:')) {
             return { mode: 'human', userId: target };
         }
-        // 无前缀，默认当作 agent 处理 (如 hr-notifier, default)
+        // 无前缀，默认当作 agent 处理 (如 hr, scout, tiger 等)
         return { mode: 'agent', agentId: target };
     }
     // wegirl_send 工具主入口
@@ -49,7 +46,7 @@ export class WeGirlTools {
         const isSyncMode = effectiveTimeout > 0;
         this.logger.info(`[WeGirlTools] [${routingId}] Sending message to ${target}, sync=${isSyncMode}, timeout=${effectiveTimeout}s`);
         // 检查 target 是否存在于 accounts cache 中
-        const targetStaffId = target.replace(/^agent:/, '').replace(/^human:/, '');
+        const targetStaffId = target.replace(/^agent:/, '');
         if (!hasAccount(targetStaffId)) {
             this.logger.warn(`[WeGirlTools] [${routingId}] Target not found in accounts: ${target}`);
             // 尝试从 Redis 重新加载（可能是最新的）
@@ -456,7 +453,7 @@ export class WeGirlTools {
         pipeline.zadd(`${KEY_PREFIX}tasks:${userId}:by_status`, now, `pending:${taskId}`);
         await pipeline.exec();
         await this.publishRoutingEvent(routingId, 'task_created', { taskId, userId });
-        return { success: true, target: `human:${userId}`, taskId, messageLength: params.message.length, routingId };
+        return { success: true, target: userId, taskId, messageLength: params.message.length, routingId };
     }
     async deliverToCapability(capability, strategy, envelope, params, routingId) {
         await this.publishRoutingEvent(routingId, 'capability_lookup', { capability, strategy });

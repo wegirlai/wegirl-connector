@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.2.0 (2026-04-02) ⭐ Current
+### v2.3.0 (2026-04-03) ⭐ Current
+
+**移除 `human:` 前缀 + Agent 档案管理**:
+- ✅ 使用 Redis 查询自动判断人类/Agent 类型（移除 `human:` 前缀）
+- ✅ 新增 Agent 性格和能力管理（`update_agent_profile`/`get_agent_profile`）
+- ✅ Consumer Group 隔离（每个 agent 独立 consumer group）
+- ✅ 添加默认 outbound 适配器（修复 "Outbound not configured" 错误）
+- ✅ 修复转发消息缺少 `replyTo` 错误
+
+详见 [MILESTONE-v2.3.0.md](./MILESTONE-v2.3.0.md)
+
+### v2.2.0 (2026-04-02)
 
 **独立 Stream 架构 + 并发控制简化**:
 - ✅ 每个 agent 拥有独立的 Redis Stream（`wegirl:stream:{instanceId}:{accountId}`）

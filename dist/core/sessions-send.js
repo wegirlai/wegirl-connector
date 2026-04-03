@@ -158,8 +158,7 @@ async function handleAgentReply(params) {
             try {
                 // 动态导入避免循环依赖
                 const { wegirlSend } = await import('./send.js');
-                const targetType = replyToTarget.startsWith('human:') ||
-                    replyToTarget.startsWith('source:') ||
+                const targetType = replyToTarget.startsWith('source:') ||
                     replyToTarget.startsWith('ou_')
                     ? 'A2H' : 'A2A';
                 // 如果有媒体，先发送媒体
@@ -168,8 +167,9 @@ async function handleAgentReply(params) {
                         await wegirlSend({
                             flowType: targetType,
                             source: target,
-                            target: replyToTarget.replace(/^human:/, ''),
+                            target: replyToTarget,
                             message: '', // 媒体消息可以不带文本
+                            replyTo: 'system:no_reply', // 转发消息不需要再回复
                             routingId: `${routingId}-fwd-media-${replyToTarget}`,
                             chatType: 'direct',
                             timeoutSeconds: 0,
@@ -186,8 +186,9 @@ async function handleAgentReply(params) {
                     await wegirlSend({
                         flowType: targetType,
                         source: target,
-                        target: replyToTarget.replace(/^human:/, ''),
+                        target: replyToTarget,
                         message: text,
+                        replyTo: 'system:no_reply', // 转发消息不需要再回复
                         routingId: `${routingId}-fwd-${replyToTarget}`,
                         chatType: 'direct',
                         timeoutSeconds: 0
@@ -212,6 +213,7 @@ async function handleAgentReply(params) {
                     source: target,
                     target: source,
                     message: `❌ 转发给 [${failedNames}] 失败`,
+                    replyTo: 'system:no_reply',
                     routingId: `${routingId}-err`,
                     chatType: 'direct',
                     timeoutSeconds: 0
