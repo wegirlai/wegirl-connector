@@ -171,6 +171,7 @@ async function handleAgentReply(params: {
   messageId: string;
   createdAt: number;
   originalMetadata?: any;
+  replyTo?: string | string[];  // 添加 replyTo 参数
   cfg: any;
   channel: string;
   taskId?: string;
@@ -181,7 +182,7 @@ async function handleAgentReply(params: {
   const {
     payload, flowType, source, target, chatType, groupId, chatId,
     routingId, originalRoutingId, messageId, createdAt,
-    originalMetadata, cfg, channel, taskId, stepId, agentCount, log
+    originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log
   } = params;
 
   const text = payload.text ?? '';
@@ -226,7 +227,8 @@ async function handleAgentReply(params: {
   }
 
   // ========== 2. 转发给 replyTo（同步和异步都支持）==========
-  const originalReplyTo = originalMetadata?.replyTo;
+  // 优先使用显式传递的 replyTo，其次从 originalMetadata 获取
+  const originalReplyTo = explicitReplyTo || originalMetadata?.replyTo;
   const replyToList = Array.isArray(originalReplyTo) ? originalReplyTo : (originalReplyTo ? [originalReplyTo] : []);
   const validReplyToList = replyToList.filter(r => r && r !== source);
 
@@ -586,8 +588,10 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     body: message,
   });
 
-  // 构建包含 routingId 的消息
-  let messageWithRouting = `[ROUTING_ID:${routingId}]\n${message}`;
+  // 构建包含 routingId 和 replyTo 的消息
+  // 这样 Agent 能看到 replyTo 并在调用工具时使用
+  const effectiveReplyTo = (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo;
+  let messageWithRouting = `[ROUTING_ID:${routingId}]${effectiveReplyTo ? `\n[REPLY_TO:${effectiveReplyTo}]` : ''}\n${message}`;
 
   // 添加媒体文件信息到消息中
   const mediaFiles = originalMetadata?.mediaFiles;
@@ -673,6 +677,7 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
             messageId,
             createdAt,
             originalMetadata,
+            replyTo,  // 显式传递 replyTo
             cfg,
             channel,
             taskId,

@@ -1,11 +1,11 @@
 // src/core/send.ts - V2 发送层：参数适配 + 跨实例路由
 // 本地投递统一调用 V1 (sessions-send.ts)
 import Redis from 'ioredis';
-import { wegirlSessionsSend } from './sessions-send.js';
-import { getGlobalConfig, getWeGirlPluginConfig, getRedisConfig } from '../config.js';
+import { getWeGirlPluginConfig, getRedisConfig } from '../config.js';
 import { validateOptions, createSessionContext, isNoReply, buildMessage } from './utils.js';
 const KEY_PREFIX = 'wegirl:';
-const STREAM_PREFIX = `${KEY_PREFIX}stream:global:`;
+// 统一使用 wegirl:stream:${instanceId}:${target} 格式
+const getStreamKey = (instanceId, target) => `${KEY_PREFIX}stream:${instanceId}:${target}`;
 /**
  * StaffId 标准化规则：
  * - 普通 ID 转小写： "HR" → "hr"
@@ -73,6 +73,7 @@ async function getStaffInfo(redis, staffId) {
         type: data.type,
         name: data.name,
         instanceId: data.instanceId,
+        feishuUserId: data.feishuUserId || data.openId, // 添加飞书用户ID
         capabilities,
         status: data.status,
     };
@@ -182,32 +183,6 @@ export async function writeResponse(redis, routingId, message, payload, logger) 
     logger?.debug?.(`[WeGirlSend] Response written: ${routingId}`);
 }
 /**
- * 写入 Redis Stream（跨实例投递）
- */
-async function writeToStream(redis, targetInstanceId, ctx, message, msgType, payload) {
-    const streamKey = `${STREAM_PREFIX}${targetInstanceId}`;
-    const streamData = {
-        routingId: ctx.routingId,
-        flowType: ctx.flowType,
-        source: ctx.source,
-        target: ctx.target,
-        message,
-        chatType: ctx.chatType,
-        groupId: ctx.groupId || '',
-        msgType: msgType || 'message',
-        replyTo: JSON.stringify(ctx.replyTo),
-        taskId: ctx.taskId || '',
-        stepId: ctx.stepId || '',
-        stepTotalAgents: ctx.stepTotalAgents?.toString() || '0',
-        timestamp: Date.now().toString(),
-    };
-    if (payload) {
-        streamData.payload = JSON.stringify(payload);
-    }
-    const entries = Object.entries(streamData).flat();
-    await redis.xadd(streamKey, '*', ...entries);
-}
-/**
  * 获取当前 session 的 routingId
  * 方案 B：routingId 必须显式传入，不再自动生成
  */
@@ -241,9 +216,8 @@ async function saveSessionRoutingId(source, routingId, redis, ttl = 3600) {
  * 1. 参数标准化验证
  * 2. 查询目标 Staff 信息
  * 3. A2H 直接发布到 replies
- * 4. 跨实例 → 写入 Redis Stream
- * 5. 本地 → 调用 V1 wegirlSessionsSend
- * 6. 同步模式 → 阻塞等待响应（timeoutSeconds > 0）
+ * 4. 统一写入 Redis Stream（不分本地/远程）
+ * 5. 同步模式 → 阻塞等待响应（timeoutSeconds > 0）
  */
 export async function wegirlSend(options, logger) {
     // 先获取 Redis 连接以查询/保存 routingId
@@ -305,10 +279,12 @@ export async function wegirlSend(options, logger) {
                 logger?.debug?.(`[WeGirlSend] A2H with NO_REPLY, skipping`);
                 return { success: true, routingId, local: true };
             }
+            // A2H 消息保持原始 target（如 "tiger"）
+            // wegirl-service 会通过 target 查找 feishu_userid 并发送消息
             const replyMessage = buildMessage({
                 flowType: 'A2H',
                 source: ctx.source,
-                target: ctx.target,
+                target: ctx.target, // 保持原始 target（如 "tiger"）
                 message: options.message,
                 chatType: ctx.chatType,
                 groupId: ctx.groupId,
@@ -324,115 +300,55 @@ export async function wegirlSend(options, logger) {
                 }
             });
             await redis.publish(`${KEY_PREFIX}replies`, JSON.stringify(replyMessage));
-            logger?.info?.(`[WeGirlSend] A2H published to replies`);
+            logger?.info?.(`[WeGirlSend] A2H published to replies: target=${ctx.target}`);
             return { success: true, routingId, local: true };
         }
-        // 6. 判断本地/跨实例
-        const currentInstanceId = getCurrentInstanceId();
-        const targetInstanceId = targetInfo.instanceId || currentInstanceId;
-        const isLocal = targetInstanceId === currentInstanceId;
-        const startTime = Date.now();
-        // 7. 跨实例：写入 Stream
-        if (!isLocal) {
-            // 构建完整的消息数据对象
-            const messageData = {
-                flowType: ctx.flowType,
-                source: ctx.source,
-                target: ctx.target,
-                message: options.message,
-                chatType: ctx.chatType,
-                groupId: ctx.groupId,
-                routingId: ctx.routingId,
-                msgType: options.msgType || 'message',
-                replyTo: ctx.replyTo,
-                taskId: ctx.taskId,
-                stepId: ctx.stepId,
-                stepTotalAgents: ctx.stepTotalAgents,
-                timestamp: Date.now(),
-            };
-            // 同步模式：传递 timeout 信息
-            if (isSyncMode) {
-                messageData.timeoutSeconds = timeoutSeconds;
-                messageData.awaitResponse = true;
-            }
-            if (options.payload) {
-                messageData.payload = options.payload;
-            }
-            // 把整个消息作为 JSON 字符串放入 data 字段
-            const streamEntries = ['data', JSON.stringify(messageData)];
-            await redis.xadd(`${STREAM_PREFIX}${targetInstanceId}`, 'MAXLEN', '~', 5000, '*', ...streamEntries);
-            logger?.info?.(`[WeGirlSend] Cross-instance delivery to ${targetInstanceId}`);
-            // 同步模式：阻塞等待响应
-            if (isSyncMode) {
-                const response = await waitForResponse(redis, routingId, timeoutSeconds * 1000, logger);
-                return {
-                    ...response,
-                    routingId,
-                    local: false,
-                    targetInstanceId
-                };
-            }
-            return {
-                success: true,
-                routingId,
-                local: false,
-                targetInstanceId
-            };
-        }
-        // 8. 本地：调用 V1 统一投递
-        logger?.info?.(`[WeGirlSend] Local delivery to ${ctx.target} via V1`);
-        // 使用全局配置
-        const fullCfg = getGlobalConfig() || {};
-        // 构建 V1 参数
-        const chatId = ctx.chatType === 'group'
-            ? (ctx.groupId || ctx.source)
-            : ctx.source;
-        const metadata = {
-            originatingChannel: 'wegirl',
-            originatingTo: ctx.source,
-            originatingAccountId: ctx.target,
-            replyTo: ctx.replyTo,
-        };
-        if (ctx.taskId)
-            metadata.taskId = ctx.taskId;
-        if (ctx.stepId)
-            metadata.stepId = ctx.stepId;
-        // 同步模式：传递等待信息给 V1
-        if (isSyncMode) {
-            metadata.awaitResponse = true;
-            metadata.timeoutSeconds = timeoutSeconds;
-            metadata.responseRoutingId = routingId;
-        }
-        // 调用 V1 - 使用统一参数名
-        await wegirlSessionsSend({
-            message: options.message,
+        // 6. 统一写入 Redis Stream（不分本地/远程）
+        const targetInstanceId = targetInfo.instanceId || getCurrentInstanceId();
+        // 构建完整的消息数据对象
+        const messageData = {
+            flowType: ctx.flowType,
             source: ctx.source,
             target: ctx.target,
+            message: options.message,
             chatType: ctx.chatType,
-            groupId: chatId,
+            groupId: ctx.groupId,
             routingId: ctx.routingId,
+            msgType: options.msgType || 'message',
+            replyTo: ctx.replyTo,
             taskId: ctx.taskId,
             stepId: ctx.stepId,
             stepTotalAgents: ctx.stepTotalAgents,
-            msgType: options.msgType,
-            payload: options.payload,
-            metadata,
-            fromType: 'inner', // wegirlSend 调用标记为 inner
-            // V1 内部字段
-            cfg: fullCfg,
-            channel: 'wegirl',
-            log: logger,
-        });
+            timestamp: Date.now(),
+        };
+        // 同步模式：传递 timeout 信息
+        if (isSyncMode) {
+            messageData.timeoutSeconds = timeoutSeconds;
+            messageData.awaitResponse = true;
+        }
+        if (options.payload) {
+            messageData.payload = options.payload;
+        }
+        // 把整个消息作为 JSON 字符串放入 data 字段
+        const streamEntries = ['data', JSON.stringify(messageData)];
+        await redis.xadd(getStreamKey(targetInstanceId, ctx.target), 'MAXLEN', '~', 5000, '*', ...streamEntries);
+        logger?.info?.(`[WeGirlSend] Message written to stream: ${getStreamKey(targetInstanceId, ctx.target)}`);
         // 同步模式：阻塞等待响应
         if (isSyncMode) {
             const response = await waitForResponse(redis, routingId, timeoutSeconds * 1000, logger);
             return {
                 ...response,
                 routingId,
-                local: true
+                local: true,
+                targetInstanceId
             };
         }
-        return { success: true, routingId, local: true };
+        return {
+            success: true,
+            routingId,
+            local: true,
+            targetInstanceId
+        };
     }
     catch (err) {
         // 同步模式：清理等待标记

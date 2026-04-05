@@ -99,6 +99,7 @@ export interface StaffInfo {
   type: 'agent' | 'human';
   name?: string;
   instanceId?: string;      // agent 特有
+  feishuUserId?: string;    // human 特有，飞书 open_id
   capabilities?: string[];  // agent 特有
   status?: string;
 }

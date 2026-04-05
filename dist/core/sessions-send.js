@@ -109,7 +109,7 @@ function inferMediaType(url) {
  * 处理 Agent 回复的核心逻辑（在 deliver 回调中调用）
  */
 async function handleAgentReply(params) {
-    const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, cfg, channel, taskId, stepId, agentCount, log } = params;
+    const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log } = params;
     const text = payload.text ?? '';
     const mediaUrls = resolveOutboundMediaUrls(payload);
     log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}`);
@@ -148,7 +148,8 @@ async function handleAgentReply(params) {
         // 同步模式下继续执行后续转发逻辑（如果有 replyTo）
     }
     // ========== 2. 转发给 replyTo（同步和异步都支持）==========
-    const originalReplyTo = originalMetadata?.replyTo;
+    // 优先使用显式传递的 replyTo，其次从 originalMetadata 获取
+    const originalReplyTo = explicitReplyTo || originalMetadata?.replyTo;
     const replyToList = Array.isArray(originalReplyTo) ? originalReplyTo : (originalReplyTo ? [originalReplyTo] : []);
     const validReplyToList = replyToList.filter(r => r && r !== source);
     if (validReplyToList.length > 0) {
@@ -475,8 +476,10 @@ async function processMessage(options) {
         timestamp: new Date(),
         body: message,
     });
-    // 构建包含 routingId 的消息
-    let messageWithRouting = `[ROUTING_ID:${routingId}]\n${message}`;
+    // 构建包含 routingId 和 replyTo 的消息
+    // 这样 Agent 能看到 replyTo 并在调用工具时使用
+    const effectiveReplyTo = (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo;
+    let messageWithRouting = `[ROUTING_ID:${routingId}]${effectiveReplyTo ? `\n[REPLY_TO:${effectiveReplyTo}]` : ''}\n${message}`;
     // 添加媒体文件信息到消息中
     const mediaFiles = originalMetadata?.mediaFiles;
     if (mediaFiles && Array.isArray(mediaFiles) && mediaFiles.length > 0) {
@@ -557,6 +560,7 @@ async function processMessage(options) {
                         messageId,
                         createdAt,
                         originalMetadata,
+                        replyTo, // 显式传递 replyTo
                         cfg,
                         channel,
                         taskId,

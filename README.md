@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.3.0 (2026-04-03) ⭐ Current
+### v2.3.1 (2026-04-05) ⭐ Current
+
+**A2H 消息修复与 replyTo 优化**:
+- ✅ `hr_manage` 工具添加 `replyTo` 参数支持
+- ✅ 消息内容嵌入 `[REPLY_TO:xxx]` 标记，Agent 可提取使用
+- ✅ 修复 `handleAgentReply` replyTo 传递问题
+- ✅ A2H 消息保持原始 `target` 格式，由 wegirl-service 处理转换
+- ✅ 更新 `StaffInfo` 类型定义
+
+详见 [MILESTONE-v2.3.1.md](./MILESTONE-v2.3.1.md)
+
+### v2.3.0 (2026-04-03)
 
 **移除 `human:` 前缀 + Agent 档案管理**:
 - ✅ 使用 Redis 查询自动判断人类/Agent 类型（移除 `human:` 前缀）

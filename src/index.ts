@@ -279,9 +279,10 @@ const plugin = {
     });
 
     // 启动全局 Stream 消费者（单例模式）
-    startGlobalStreamConsumer(context, pluginConfig, INSTANCE_ID).catch((err: Error) => {
-      logger.error('[WeGirl register] Global stream consumer failed:', err.message);
-    });
+    // 注意：已弃用，统一使用 wegirl:stream:${instanceId}:${accountId} 格式
+    // startGlobalStreamConsumer(context, pluginConfig, INSTANCE_ID).catch((err: Error) => {
+    //   logger.error('[WeGirl register] Global stream consumer failed:', err.message);
+    // });
 
     // 注册 Channel（同步）
     if (typeof context.registerChannel === 'function') {
@@ -392,7 +393,7 @@ const plugin = {
       // HR Manage Tool - 仅限 HR Agent 使用
       context.registerTool({
         name: 'hr_manage',
-        description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 同步本地信息到 Redis 使用 sync_agents_to_redis。',
+        description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 同步本地信息到 Redis 使用 sync_agents_to_redis。\n\n**重要提示**：当需要将结果发送给特定用户时，必须传递 replyTo 参数（例如：replyTo: "human:tiger" 或 replyTo: "tiger"）。如果不传递 replyTo，结果将只返回给当前会话。',
         parameters: {
           type: 'object',
           properties: {
@@ -462,6 +463,10 @@ const plugin = {
             routingId: {
               type: 'string',
               description: '路由追踪ID（可选）'
+            },
+            replyTo: {
+              type: 'string',
+              description: '回复目标 StaffId（重要！）。当需要将结果发送给指定用户时，必须传递此参数。例如："human:tiger" 或 "tiger"'
             }
           },
           required: ['action']
@@ -478,8 +483,11 @@ const plugin = {
           // 获取消息上下文信息（用于主动回复）
           const routingId = params.routingId;
           // replyTo 可能是 string 或 string[]，统一处理为 string
+          // 优先使用传入的 replyTo，如果没有则尝试从消息上下文中获取
           const rawReplyTo = params.replyTo || params.source;
           const replyTo = Array.isArray(rawReplyTo) ? rawReplyTo[0] : rawReplyTo;
+          
+          logger?.info?.(`[hr_manage] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
           const isSyncMode = params.timeoutSeconds > 0;
 
           let result: any;

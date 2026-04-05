@@ -78,6 +78,7 @@ export interface StaffInfo {
     type: 'agent' | 'human';
     name?: string;
     instanceId?: string;
+    feishuUserId?: string;
     capabilities?: string[];
     status?: string;
 }
