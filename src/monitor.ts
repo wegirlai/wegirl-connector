@@ -116,34 +116,41 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
           
           log?.info?.(`[WeGirl:${accountId}] Processing message ${id}: ${msg.flowType} from ${msg.source}`);
           
-          // 调用 wegirlSessionsSend（使用 dispatchReplyWithBufferedBlockDispatcher）
-          await wegirlSessionsSend({
-            message: msg.message,
-            source: msg.source,
-            target: msg.target,
-            chatType: msg.chatType || 'direct',
-            groupId: msg.groupId,
-            routingId: msg.routingId,
-            taskId: msg.taskId,
-            stepId: msg.stepId,
-            stepTotalAgents: msg.stepTotalAgents,
-            msgType: msg.msgType,
-            payload: msg.payload,
-            metadata: msg.metadata,
-            replyTo: msg.replyTo,
-            fromType: 'outer',  // 标记为外部调用
-            cfg,
-            channel: 'wegirl',
-            log,
-          });
-          
-          // 确认消息已处理
+          // ⚠️ 关键修改：先确认消息，再处理（at-least-once 语义）
+          // 这样可以防止 Agent 处理卡住时消息一直 pending
           await redis.xack(streamKey, consumerGroup, id);
-          log?.info?.(`[WeGirl:${accountId}] Message ${id} processed`);
+          log?.debug?.(`[WeGirl:${accountId}] Message ${id} acknowledged before processing`);
+          
+          try {
+            // 调用 wegirlSessionsSend（使用 dispatchReplyWithBufferedBlockDispatcher）
+            await wegirlSessionsSend({
+              message: msg.message,
+              source: msg.source,
+              target: msg.target,
+              chatType: msg.chatType || 'direct',
+              groupId: msg.groupId,
+              routingId: msg.routingId,
+              taskId: msg.taskId,
+              stepId: msg.stepId,
+              stepTotalAgents: msg.stepTotalAgents,
+              msgType: msg.msgType,
+              payload: msg.payload,
+              metadata: msg.metadata,
+              replyTo: msg.replyTo,
+              fromType: 'outer',  // 标记为外部调用
+              cfg,
+              channel: 'wegirl',
+              log,
+            });
+            log?.info?.(`[WeGirl:${accountId}] Message ${id} processed successfully`);
+          } catch (processErr: any) {
+            // 处理失败，但消息已经确认，记录错误但不阻塞
+            log?.error?.(`[WeGirl:${accountId}] Message ${id} processing failed (already acknowledged):`, processErr.message);
+          }
           
         } catch (err: any) {
-          log?.error?.(`[WeGirl:${accountId}] Failed to process message ${id}:`, err.message);
-          // 不确认消息，让它保留在 pending 列表中，稍后重试
+          log?.error?.(`[WeGirl:${accountId}] Failed to parse/ack message ${id}:`, err.message);
+          // 解析或确认失败，消息不会 ack，会保留在 pending 列表中稍后重试
         }
       }
     } catch (err: any) {

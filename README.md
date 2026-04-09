@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v2.3.1 (2026-04-05) ⭐ Current
+### v1.0.3 (2026-04-09) ⭐ Current
+
+**稳定性优化与日志改进**:
+- ✅ 消息去重机制：防止重复发送消息（LRU 缓存，最多 1000 条）
+- ✅ 日志格式优化：所有日志添加 `instanceId` 前缀，便于多实例调试
+- ✅ At-Least-Once 语义：先确认消息再处理，防止 Agent 卡住时消息 pending
+
+详见 [MILESTONE-v1.0.3.md](./MILESTONE-v1.0.3.md)
+
+---
+
+### v2.3.1 (2026-04-05)
 
 **A2H 消息修复与 replyTo 优化**:
 - ✅ `hr_manage` 工具添加 `replyTo` 参数支持

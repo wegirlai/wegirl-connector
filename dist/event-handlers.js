@@ -36,10 +36,10 @@ export function registerEventHandlers(ctx, force = false) {
                     instanceId,
                     version: '1.0'
                 });
-                logger.info(`[WeGirl] Agent auto-registered: ${agentId}`);
+                logger.info(`[WeGirl:${instanceId}] Agent auto-registered: ${agentId}`);
             }
             catch (err) {
-                logger.error(`[WeGirl] Agent registration failed:`, err.message);
+                logger.error(`[WeGirl:${instanceId}] Agent registration failed:`, err.message);
             }
         }
         await persistEvent('before_agent_start', event, ctx);
@@ -50,7 +50,7 @@ export function registerEventHandlers(ctx, force = false) {
         const registry = getRegistry();
         if (agentId && registry) {
             await registry.unregisterAgent(agentId);
-            logger.info(`[WeGirl] Agent unregistered: ${agentId}`);
+            logger.info(`[WeGirl:${instanceId}] Agent unregistered: ${agentId}`);
         }
         await persistEvent('agent_end', event, ctx);
     });
@@ -60,7 +60,7 @@ export function registerEventHandlers(ctx, force = false) {
     });
     // Agent 错误
     context.on('agent_error', (event) => {
-        logger.error(`[WeGirl] Event: agent_error`);
+        logger.error(`[WeGirl:${instanceId}] Event: agent_error`);
         persistEvent('agent_error', event, ctx);
     });
     // 收到消息
@@ -69,22 +69,22 @@ export function registerEventHandlers(ctx, force = false) {
         const preview = typeof content === 'string'
             ? content.substring(0, 100)
             : JSON.stringify(content).substring(0, 100);
-        logger.info(`[WeGirl] Event: message_received, content=${preview}${content.length > 100 ? '...' : ''}`);
+        logger.info(`[WeGirl:${instanceId}] Event: message_received, content=${preview}${content.length > 100 ? '...' : ''}`);
         persistEvent('message_received', event, ctx);
     });
     // 发送消息
     context.on('message_sent', (event) => {
-        logger.info(`[WeGirl] Event: message_sent`);
+        logger.info(`[WeGirl:${instanceId}] Event: message_sent`);
         persistEvent('message_sent', event, ctx);
     });
     // 会话创建
     context.on('session_created', (event) => {
-        logger.info('[WeGirl] Event: session_created');
+        logger.info(`[WeGirl:${instanceId}] Event: session_created`);
         persistEvent('session_created', event, ctx);
     });
     // 会话结束
     context.on('session_ended', (event) => {
-        logger.info('[WeGirl] Event: session_ended');
+        logger.info(`[WeGirl:${instanceId}] Event: session_ended`);
         persistEvent('session_ended', event, ctx);
     });
     // Tool 调用前 (兼容 2026.2.23)
@@ -94,7 +94,7 @@ export function registerEventHandlers(ctx, force = false) {
         const toolName = event?.toolName || event?.tool || 'unknown';
         const params = event?.params || event?.args || {};
         const target = extractTarget(toolName, params);
-        logger.info(`[WeGirl Event] before_tool_call - ${toolName} (${target})`);
+        logger.info(`[WeGirl Event:${instanceId}] before_tool_call - ${toolName} (${target})`);
         persistEvent('before_tool_call', event, ctx);
     });
     // Tool 调用后 (兼容 2026.2.23)
@@ -105,10 +105,10 @@ export function registerEventHandlers(ctx, force = false) {
         const params = event?.params || event?.args || {};
         const duration = event?.durationMs || event?.duration || 'unknown';
         const target = extractTarget(toolName, params);
-        logger.info(`[WeGirl Event] after_tool_call - ${toolName} (${target}) ${duration}ms`);
+        logger.info(`[WeGirl Event:${instanceId}] after_tool_call - ${toolName} (${target}) ${duration}ms`);
         persistEvent('after_tool_call', event, ctx);
     });
-    logger.info('[WeGirl] Event handlers registered (10 events)');
+    logger.info(`[WeGirl:${instanceId}] Event handlers registered (10 events)`);
 }
 /**
  * 从工具参数中提取目标（文件路径或命令）
@@ -148,11 +148,17 @@ async function persistEvent(eventType, payload, ctx) {
         return;
     const timestamp = Date.now();
     const eventId = randomUUID();
+    // 在 payload 中添加 instanceId，方便识别来源
+    const payloadWithInstance = {
+        ...payload,
+        _instanceId: ctx.instanceId,
+        _wegirlInstance: true,
+    };
     const eventData = {
         id: eventId,
         type: eventType,
         timestamp: timestamp.toString(),
-        payload: JSON.stringify(payload),
+        payload: JSON.stringify(payloadWithInstance),
         sessionId: payload?.sessionId || 'global',
         userId: payload?.userId || 'system',
         instanceId: ctx.instanceId,

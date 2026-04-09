@@ -6,6 +6,30 @@ import { buildMessage } from './utils.js';
 import type { OutboundReplyPayload } from "openclaw/plugin-sdk";
 import { createReplyPrefixOptions, resolveOutboundMediaUrls } from "openclaw/plugin-sdk";
 
+// 消息去重缓存：最近发送的消息 ID
+const sentMessageIds = new Set<string>();
+const MAX_CACHE_SIZE = 1000;
+
+/** 检查并记录消息ID，返回是否已存在（重复） */
+function isDuplicateMessage(messageId: string): boolean {
+  if (sentMessageIds.has(messageId)) {
+    return true;
+  }
+  
+  // 添加到缓存
+  sentMessageIds.add(messageId);
+  
+  // 限制缓存大小
+  if (sentMessageIds.size > MAX_CACHE_SIZE) {
+    const firstKey = sentMessageIds.values().next().value;
+    if (firstKey) {
+      sentMessageIds.delete(firstKey);
+    }
+  }
+  
+  return false;
+}
+
 interface SessionsSendOptions {
   // 核心消息字段（与 wegirl_send 标准一致）
   /** 消息内容 */
@@ -384,6 +408,13 @@ async function handleAgentReply(params: {
           }
         });
 
+        // 去重检查
+        const messageKey = `${messageId}:${text.substring(0, 50)}:group`;
+        if (isDuplicateMessage(messageKey)) {
+          log?.info?.(`[handleAgentReply] Duplicate group message detected, skipping: ${messageKey}`);
+          return;
+        }
+
         await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
       }
 
@@ -454,6 +485,13 @@ async function handleAgentReply(params: {
           duration: Date.now() - createdAt,
         }
       });
+
+      // 去重检查：基于消息ID和内容的哈希
+      const messageKey = `${messageId}:${text.substring(0, 50)}`;
+      if (isDuplicateMessage(messageKey)) {
+        log?.info?.(`[handleAgentReply] Duplicate message detected, skipping: ${messageKey}`);
+        return;
+      }
 
       console.log(`[handleAgentReply]`, JSON.stringify(replyMessage, null, 2));
       await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
