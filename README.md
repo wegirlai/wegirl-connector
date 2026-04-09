@@ -31,7 +31,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 日志格式优化：所有日志添加 `instanceId` 前缀，便于多实例调试
 - ✅ At-Least-Once 语义：先确认消息再处理，防止 Agent 卡住时消息 pending
 
-详见 [MILESTONE-v1.0.3.md](./MILESTONE-v1.0.3.md)
+详见 [MILESTONE-v1.0.3.md](./milestones/MILESTONE-v1.0.3.md)
 
 ---
 
@@ -44,7 +44,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ A2H 消息保持原始 `target` 格式，由 wegirl-service 处理转换
 - ✅ 更新 `StaffInfo` 类型定义
 
-详见 [MILESTONE-v2.3.1.md](./MILESTONE-v2.3.1.md)
+详见 [MILESTONE-v2.3.1.md](./milestones/MILESTONE-v2.3.1.md)
 
 ### v2.3.0 (2026-04-03)
 
@@ -55,7 +55,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 添加默认 outbound 适配器（修复 "Outbound not configured" 错误）
 - ✅ 修复转发消息缺少 `replyTo` 错误
 
-详见 [MILESTONE-v2.3.0.md](./MILESTONE-v2.3.0.md)
+详见 [MILESTONE-v2.3.0.md](./milestones/MILESTONE-v2.3.0.md)
 
 ### v2.2.0 (2026-04-02)
 
@@ -66,7 +66,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ OpenClaw 内部自动串行化，无需额外并发控制
 - ✅ 消息只被目标 agent 读取一次（消除 N 倍广播浪费）
 
-详见 [MILESTONE-v2.2.0.md](./MILESTONE-v2.2.0.md)
+详见 [MILESTONE-v2.2.0.md](./milestones/MILESTONE-v2.2.0.md)
 
 ---
 
@@ -78,7 +78,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 添加 Agent 级消息队列，串行处理消息避免并发冲突
 - ✅ 修复 OpenClaw 2026.2.24 动态模块加载竞态条件
 
-详见 [MILESTONE-v2.1.9.md](./MILESTONE-v2.1.9.md)
+详见 [MILESTONE-v2.1.9.md](./milestones/MILESTONE-v2.1.9.md)
 
 ---
 
@@ -90,7 +90,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 修复 Stream key 不一致问题（`stream:instance:` → `stream:global:`）
 - ✅ 保留所有功能：同步等待、replyTo 转发、群聊聚合、媒体支持
 
-详见 [MILESTONE-v2.1.8.md](./MILESTONE-v2.1.8.md)
+详见 [MILESTONE-v2.1.8.md](./milestones/MILESTONE-v2.1.8.md)
 
 ---
 
@@ -101,7 +101,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 通过 `MediaPath`/`MediaType` 参数让 Agent 识别图片
 - ✅ 支持单文件和多文件场景
 
-详见 [MILESTONE-v2.1.7.md](./MILESTONE-v2.1.7.md)
+详见 [MILESTONE-v2.1.7.md](./milestones/MILESTONE-v2.1.7.md)
 
 ---
 
@@ -110,7 +110,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 修复热重载后 `before_tool_call`/`after_tool_call` 日志不显示的问题
 - ✅ 解决全局变量缓存导致的重复注册跳过问题
 
-详见 [MILESTONE-v2.1.6.md](./MILESTONE-v2.1.6.md)
+详见 [MILESTONE-v2.1.6.md](./milestones/MILESTONE-v2.1.6.md)
 
 ---
 
@@ -121,7 +121,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 包含 instanceId、agentsRegistered、redisStatus
 - ✅ 用于调试插件初始化时机和防重复注册验证
 
-详见 [MILESTONE-v2.1.5.md](./MILESTONE-v2.1.5.md)
+详见 [MILESTONE-v2.1.5.md](./milestones/MILESTONE-v2.1.5.md)
 
 ---
 
@@ -132,7 +132,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 解决 channel 多 account 导致的多次初始化问题
 - ✅ 避免重复事件处理和日志输出
 
-详见 [MILESTONE-v2.1.4.md](./MILESTONE-v2.1.4.md)
+详见 [MILESTONE-v2.1.4.md](./milestones/MILESTONE-v2.1.4.md)
 
 ---
 
@@ -144,7 +144,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ `send.ts` 和 `sessions-send.ts` 共享使用
 - ✅ 确保所有消息格式一致性
 
-详见 [MILESTONE-v2.1.1.md](./MILESTONE-v2.1.1.md)
+详见 [MILESTONE-v2.1.1.md](./milestones/MILESTONE-v2.1.1.md)
 
 ---
 
@@ -157,14 +157,14 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 新增 `forwarding`/`forwarded` 返回状态
 - ✅ 统一消息构建函数 `buildMessage`
 
-详见 [MILESTONE-v2.1.0.md](./MILESTONE-v2.1.0.md)
+详见 [MILESTONE-v2.1.0.md](./milestones/MILESTONE-v2.1.0.md)
 - ✅ 支持 `replyTo` 自动转发（同步/异步模式）
 - ✅ 支持多个 `replyTo` 目标（数组）
 - ✅ 转发失败自动通知调用方
 - ✅ 新增 `forwarding`/`forwarded` 返回状态
 - ✅ 统一消息构建函数 `buildMessage`
 
-详见 [MILESTONE-v2.1.0.md](./MILESTONE-v2.1.0.md)
+详见 [MILESTONE-v2.1.0.md](./milestones/MILESTONE-v2.1.0.md)
 
 ---
 
@@ -180,7 +180,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 统一使用 `source`/`target` 替代 `userId`
 - ✅ 新增 `senderName`/`senderOpenId`/`groupId`/`routingId` 参数
 
-详见 [MILESTONE-v2.0.39.md](./MILESTONE-v2.0.39.md)
+详见 [MILESTONE-v2.0.39.md](./milestones/MILESTONE-v2.0.39.md)
 
 ---
 
@@ -192,7 +192,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ `wegirl_send` 成为主接口
 - ✅ H2A/A2A/A2H 消息流支持
 
-详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md)
+详见 [MILESTONE-v2.0.md](./milestones/MILESTONE-v2.0.md)
 
 ---
 
@@ -249,7 +249,7 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 为所有 Agent 配置 anthropic auth profile
 - ✅ 修复 isOnboardRequest/isOnboardFormat 空值检查
 
-详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md)
+详见 [MILESTONE-v2.0.md](./milestones/MILESTONE-v2.0.md)
 
 ---
 
@@ -378,7 +378,7 @@ HR Agent 专用工具（create_staff action）:
 }
 ```
 
-详见 [MILESTONE-v2.0.md](./MILESTONE-v2.0.md) 完整版本历史。
+详见 [MILESTONE-v2.0.md](./milestones/MILESTONE-v2.0.md) 完整版本历史。
 
 ## 核心模块
 
