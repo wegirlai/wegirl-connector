@@ -15,13 +15,19 @@ interface MonitorParams {
 /**
  * 监控 WeGirl Redis Stream（每个 agent 独立）
  * 监听 wegirl:stream:${instanceId}:${accountId}
+ * 
+ * ⚠️ 设计原则：
+ * 1. 此函数从 Stream 接收消息
+ * 2. 调用 wegirlSessionsSend 完成实际的 act（Agent 处理）
+ * 3. 处理成功后才 ACK 消息（at-least-once 语义）
+ * 4. 如果处理失败，消息保留在 pending 列表中，可被重新消费
  */
 export async function monitorWeGirlProvider(params: MonitorParams): Promise<void> {
   const { accountId, instanceId, cfg, abortSignal, log } = params;
   
   // 每个 agent 独立的 stream key 和消费者组
   const streamKey = `wegirl:stream:${instanceId}:${accountId}`;
-  const consumerGroup = `wegirl-consumers-${instanceId}-${accountId}`;  // 每个 agent 独立的消费者组
+  const consumerGroup = `wegirl-consumers-${instanceId}-${accountId}`;
   const consumerName = `${accountId}-${Date.now()}`;
   
   log?.info?.(`[WeGirl:${accountId}] Starting monitor for stream: ${streamKey}`);
@@ -38,7 +44,7 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
     lazyConnect: true,
   });
   
-  // 2. 显式连接 Redis（因为 lazyConnect: true）
+  // 2. 显式连接 Redis
   try {
     await redis.connect();
     log?.info?.(`[WeGirl:${accountId}] Redis connected`);
@@ -47,7 +53,7 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
     throw err;
   }
   
-  // 2. 创建消费者组（如果不存在）
+  // 3. 创建消费者组
   try {
     await redis.xgroup('CREATE', streamKey, consumerGroup, '$', 'MKSTREAM');
     log?.info?.(`[WeGirl:${accountId}] Created consumer group: ${consumerGroup}`);
@@ -59,12 +65,12 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
     log?.debug?.(`[WeGirl:${accountId}] Consumer group already exists: ${consumerGroup}`);
   }
   
-  // 3. 顺序消费消息循环
+  // 4. 消息接收循环
   log?.info?.(`[WeGirl:${accountId}] Entering consume loop...`);
   
   while (!abortSignal?.aborted) {
     try {
-      // 读取消息（阻塞 5 秒，每次只读 1 条，保证顺序）
+      // 读取消息（阻塞 5 秒，每次只读 1 条）
       const result = await (redis as any).xreadgroup(
         'GROUP', consumerGroup, consumerName,
         'BLOCK', 5000,
@@ -76,7 +82,6 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
         continue;
       }
       
-      // 解析结果
       const streamData = result[0];
       if (!streamData || !Array.isArray(streamData) || streamData.length < 2) {
         continue;
@@ -87,7 +92,7 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
         continue;
       }
       
-      // 处理消息（顺序处理，一次一条）
+      // 处理消息
       for (const entry of entries) {
         if (!Array.isArray(entry) || entry.length < 2) continue;
         
@@ -114,15 +119,11 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
           
           const msg = JSON.parse(messageData);
           
-          log?.info?.(`[WeGirl:${accountId}] Processing message ${id}: ${msg.flowType} from ${msg.source}`);
+          log?.info?.(`[WeGirl:${accountId}] Received message ${id}: ${msg.flowType} from ${msg.source}`);
           
-          // ⚠️ 关键修改：先确认消息，再处理（at-least-once 语义）
-          // 这样可以防止 Agent 处理卡住时消息一直 pending
-          await redis.xack(streamKey, consumerGroup, id);
-          log?.debug?.(`[WeGirl:${accountId}] Message ${id} acknowledged before processing`);
-          
+          // ⚠️ 关键：调用 wegirlSessionsSend，由它内部完成 act
+          // 使用 await 确保处理完成后再 ACK，实现 at-least-once 语义
           try {
-            // 调用 wegirlSessionsSend（使用 dispatchReplyWithBufferedBlockDispatcher）
             await wegirlSessionsSend({
               message: msg.message,
               source: msg.source,
@@ -137,20 +138,27 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
               payload: msg.payload,
               metadata: msg.metadata,
               replyTo: msg.replyTo,
-              fromType: 'outer',  // 标记为外部调用
+              fromType: 'outer',
               cfg,
               channel: 'wegirl',
               log,
             });
-            log?.info?.(`[WeGirl:${accountId}] Message ${id} processed successfully`);
-          } catch (processErr: any) {
-            // 处理失败，但消息已经确认，记录错误但不阻塞
-            log?.error?.(`[WeGirl:${accountId}] Message ${id} processing failed (already acknowledged):`, processErr.message);
+            
+            log?.info?.(`[WeGirl:${accountId}] Message ${id} processed via wegirlSessionsSend`);
+            
+            // ⚠️ 关键修改：处理成功后再 ACK
+            // 这样如果处理失败，消息会保留在 pending 列表中，可被重新消费
+            await redis.xack(streamKey, consumerGroup, id);
+            log?.debug?.(`[WeGirl:${accountId}] Message ${id} acknowledged after processing`);
+            
+          } catch (err: any) {
+            log?.error?.(`[WeGirl:${accountId}] Message ${id} processing failed:`, err.message);
+            // 处理失败，不 ACK，消息会保留在 pending 列表中等待重试
+            // 注意：如果失败次数过多，可能需要人工介入清理
           }
           
         } catch (err: any) {
           log?.error?.(`[WeGirl:${accountId}] Failed to parse/ack message ${id}:`, err.message);
-          // 解析或确认失败，消息不会 ack，会保留在 pending 列表中稍后重试
         }
       }
     } catch (err: any) {
@@ -159,7 +167,7 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
     }
   }
   
-  // 4. 清理
+  // 5. 清理
   log?.info?.(`[WeGirl:${accountId}] Monitor stopped`);
   await redis.quit();
 }

@@ -102,6 +102,10 @@ const wegirlPlugin = {
             /**
              * 启动 channel account（OpenClaw 调用）
              * 每个 agent 独立监听自己的 Redis Stream
+             *
+             * ⚠️ 设计：此函数只启动 Stream 消费者（monitorWeGirlProvider）
+             * 收到消息后调用 wegirlSessionsSend，由它内部完成 act（Agent 处理）
+             * 这样实现接收和处理的解耦
              */
             async startAccount(ctx) {
                 const accountId = ctx?.account?.accountId || 'default';
