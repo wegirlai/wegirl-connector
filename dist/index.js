@@ -783,8 +783,8 @@ async function handleListAgents(redis, logger) {
                 return null;
             }
             const data = await redis.hgetall(key);
-            // 只返回 agent 类型
-            if (data.type !== 'agent')
+            // 返回所有 staff（包括 agent 和 human）
+            if (data.type !== 'agent' && data.type !== 'human')
                 return null;
             // 解析性格和能力
             let personalityVibe = '-';
