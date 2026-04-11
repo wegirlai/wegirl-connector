@@ -256,23 +256,29 @@ export async function wegirlSend(options, logger) {
         logger?.info?.(`[WeGirlSend] ${ctx.flowType}: ${ctx.source} -> ${ctx.target}`);
         // 4. 查询目标 Staff 信息
         const targetInfo = await getStaffInfo(redis, ctx.target);
+        if (!targetInfo)
+            return {
+                routingId,
+                success: false,
+                error: `${ctx.target} 不存在`
+            };
         // 保存 routingId 到当前 session（供后续调用保持一致）
         await saveSessionRoutingId(ctx.source, routingId, redis);
         logger?.debug?.(`[WeGirlSend] Saved routingId ${routingId} for session ${ctx.source}`);
-        if (!targetInfo) {
-            // 同步模式：清理等待标记
-            if (isSyncMode) {
-                await redis.del(`${KEY_PREFIX}await:${routingId}`);
-            }
-            // 查询建议
-            const suggestions = await findSimilarStaff(redis, ctx.target);
-            throw new Error(`Target "${ctx.target}" 不存在！\n\n` +
-                `建议操作：\n` +
-                `1. 调用 wegirl_query({ by: "id", query: "${ctx.target}" }) 查询可用 Staff\n` +
-                `2. 从返回结果中选择正确的 target\n\n` +
-                `相似匹配：${suggestions.map((s) => s.id).join(', ') || '无'}\n\n` +
-                `常用 Staff：hr, scout, harvester, analyst, quartermaster`);
+        // 同步模式：清理等待标记
+        if (isSyncMode) {
+            await redis.del(`${KEY_PREFIX}await:${routingId}`);
         }
+        /* // 查询建议
+        const suggestions = await findSimilarStaff(redis, ctx.target);
+        throw new Error(
+          `Target "${ctx.target}" 不存在！\n\n` +
+          `建议操作：\n` +
+          `1. 调用 wegirl_query({ by: "id", query: "${ctx.target}" }) 查询可用 Staff\n` +
+          `2. 从返回结果中选择正确的 target\n\n` +
+          `相似匹配：${suggestions.map((s: any) => s.id).join(', ') || '无'}\n\n` +
+          `常用 Staff：hr, scout, harvester, analyst, quartermaster`
+        ); */
         // 5. A2H：直接发布到 replies
         if (targetInfo.type === 'human') {
             if (isNoReply(ctx.replyTo)) {

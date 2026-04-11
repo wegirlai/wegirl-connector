@@ -88,7 +88,7 @@ export interface StaffInfo {
 export interface SendResult {
     success: boolean;
     routingId: string;
-    local: boolean;
+    local?: boolean;
     targetInstanceId?: string;
     error?: string;
     status?: 'ok' | 'timeout' | 'error';

@@ -4,7 +4,6 @@ import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
-import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
@@ -85,7 +84,7 @@ let redisConnectPromise = null;
 let hasSyncedAgents = false; // 确保 syncAgentsFromLocal 只执行一次
 let registry = null;
 let pendingQueue = null;
-let messageRouter = null;
+//let messageRouter: MessageRouter | null = null;
 let wegirlTools = null;
 // 全局单例控制 - 确保只有一个 Stream 消费者
 let globalConsumerStarted = false;
@@ -173,11 +172,11 @@ const plugin = {
                 // 初始化队列和路由器
                 if (redisClient) {
                     pendingQueue = new PendingQueue(redisClient);
-                    messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger, url, password);
+                    //messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger, url, password);
                     wegirlTools = new WeGirlTools(redisClient, INSTANCE_ID, logger);
                     // 启动跨实例消息监听
-                    await messageRouter.startListening();
-                    logger.info('[WeGirl register] Cross-instance message listener started');
+                    //await messageRouter.startListening();
+                    //logger.info('[WeGirl register] Cross-instance message listener started');
                     // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent（只执行一次）
                     if (!hasSyncedAgents) {
                         try {
@@ -346,7 +345,7 @@ const plugin = {
             // HR Manage Tool - 仅限 HR Agent 使用
             context.registerTool({
                 name: 'hr',
-                description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力、创建新Agent。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 创建新 Agent 使用 create_agent（示例：创建 agent：cncplanner，CNC独立站的策划师）。\n\n**重要提示**：当需要将结果发送给特定用户时，必须传递 replyTo 参数（例如：replyTo: "human:tiger" 或 replyTo: "tiger"）。如果不传递 replyTo，结果将只返回给当前会话。',
+                description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力、创建新Agent。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 创建新 Agent 使用 create_agent（示例：创建 agent：cncplanner，CNC独立站的策划师）。',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -425,10 +424,6 @@ const plugin = {
                         routingId: {
                             type: 'string',
                             description: '路由追踪ID（可选）'
-                        },
-                        replyTo: {
-                            type: 'string',
-                            description: '回复目标 StaffId（重要！）。当需要将结果发送给指定用户时，必须传递此参数。例如："human:tiger" 或 "tiger"'
                         }
                     },
                     required: ['action']
@@ -442,17 +437,12 @@ const plugin = {
                     const INSTANCE_ID = pluginConfig?.instanceId || 'instance-local';
                     // 获取消息上下文信息（用于主动回复）
                     const routingId = params.routingId;
-                    // replyTo 可能是 string 或 string[]，统一处理为 string
-                    // 优先使用传入的 replyTo，如果没有则尝试从消息上下文中获取
-                    const rawReplyTo = params.replyTo || params.source;
-                    const replyTo = Array.isArray(rawReplyTo) ? rawReplyTo[0] : rawReplyTo;
-                    logger?.info?.(`[hr] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
-                    const isSyncMode = params.timeoutSeconds > 0;
+                    logger?.info?.(`[hr] 处理 action=${action},  routingId=${routingId}`);
                     let result;
                     switch (action) {
                         case 'create_staff': {
                             const { message, chatType, source, target, senderName, groupId } = params;
-                            console.log(`[hr_manage:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, groupId, routingId }));
+                            console.log(`[hr:create_staff] 收到参数:`, JSON.stringify({ message, chatType, source, target, senderName, groupId, routingId }));
                             // 构建标准化的消息对象（与 SessionsSendOptions 对齐）
                             // source 保持原样传入，包含 "source:" 或 "source：" 前缀
                             const normalizedMessage = {
@@ -463,9 +453,9 @@ const plugin = {
                                 groupId: groupId,
                                 routingId: routingId
                             };
-                            console.log(`[hr_manage:create_staff] 构建消息对象:`, JSON.stringify(normalizedMessage));
+                            console.log(`[hr:create_staff] 构建消息对象:`, JSON.stringify(normalizedMessage));
                             result = await handleProcessMessage(normalizedMessage, redisClient, logger, INSTANCE_ID);
-                            console.log(`[hr_manage:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
+                            console.log(`[hr:create_staff] handleProcessMessage 返回:`, JSON.stringify(result));
                             // 返回 null，deliver 不会发送任何消息
                             return null;
                         }
@@ -523,39 +513,6 @@ const plugin = {
                             throw new Error(`未知操作: ${action}`);
                     }
                     logger.info(`[hr] action=${action} 执行完成`);
-                    // create_staff 已通过 redis 发送消息，返回 null 阻止 deliver
-                    if (action === 'create_staff') {
-                        return null;
-                    }
-                    // === 主动回复逻辑 ===
-                    // 如果 replyTo 存在且不是自己，主动发送结果给 replyTo
-                    if (replyTo && replyTo !== 'hr' && !replyTo.includes('hr')) {
-                        logger.info(`[hr] 检测到 replyTo=${replyTo}，准备主动发送结果`);
-                        try {
-                            // 动态导入 wegirlSend 避免循环依赖
-                            const { wegirlSend } = await import('./core/send.js');
-                            const replyMessage = formatResultForReply(action, result);
-                            const targetType = replyTo.startsWith('source:') || replyTo.startsWith('ou_')
-                                ? 'A2H' : 'A2A';
-                            // 发送给 replyTo
-                            await wegirlSend({
-                                flowType: targetType,
-                                source: 'hr',
-                                target: replyTo,
-                                message: replyMessage,
-                                replyTo: replyTo,
-                                routingId: routingId || `hr-reply-${Date.now()}`,
-                                chatType: 'direct'
-                            }, logger);
-                            logger.info(`[hr] 已主动发送结果给 ${replyTo}`);
-                            // 主动发送后，返回 null 防止再次发送
-                            return null;
-                        }
-                        catch (err) {
-                            logger.error(`[hr] 主动发送失败: ${err.message}`);
-                            // 发送失败，返回正常结果
-                        }
-                    }
                     // 返回 OpenClaw 期望的格式
                     return {
                         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -868,6 +825,14 @@ async function handleListAgents(redis, logger) {
         }
     }));
     const validAgents = agents.filter(a => a !== null);
+    // 按 instanceId 排序
+    validAgents.sort((a, b) => {
+        if (a.instanceId < b.instanceId)
+            return -1;
+        if (a.instanceId > b.instanceId)
+            return 1;
+        return 0;
+    });
     logger.info(`[hr] Returning ${validAgents.length} agents`);
     return {
         success: true,
@@ -1230,7 +1195,7 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
  */
 async function handleSendCommand(args, redis, logger, instanceId) {
     const { command, payload } = args;
-    logger.info(`[hr_manage:send_command] Sending command: ${command}`);
+    logger.info(`[hr:send_command] Sending command: ${command}`);
     // 构建消息 - 使用标准 V2 格式
     const routingId = randomUUID();
     const message = {
@@ -1254,7 +1219,7 @@ async function handleSendCommand(args, redis, logger, instanceId) {
     try {
         // 发布到 wegirl:replies channel
         await redis.publish('wegirl:replies', JSON.stringify(message));
-        logger.info(`[hr_manage:send_command] Command sent to wegirl:replies: ${command}`);
+        logger.info(`[hr:send_command] Command sent to wegirl:replies: ${command}`);
         return {
             success: true,
             command: command,
@@ -1263,7 +1228,7 @@ async function handleSendCommand(args, redis, logger, instanceId) {
         };
     }
     catch (err) {
-        logger.error(`[hr_manage:send_command] Failed to send command: ${err.message}`);
+        logger.error(`[hr:send_command] Failed to send command: ${err.message}`);
         throw new Error(`发送命令失败: ${err.message}`);
     }
 }
@@ -1272,14 +1237,14 @@ async function handleSendCommand(args, redis, logger, instanceId) {
  * 根据消息类型（私聊/群聊@）判断并发送相应命令
  */
 async function handleProcessMessage(message, redis, logger, instanceId) {
-    logger.info(`[hr_manage:create_staff] Processing message`);
+    logger.info(`[hr:create_staff] Processing message`);
     const chatType = message.chatType || message.chat_type;
     const source = message.source;
     const target = message.target;
     const mentions = message.mentions || message.metadata?.mentions || [];
     // 1. 私聊消息 → 入职绑定流程
     if ((chatType === 'p2p' || chatType === 'direct') && (!mentions || mentions.length === 0)) {
-        logger.info(`[hr_manage:create_staff] Private message from ${source}`);
+        logger.info(`[hr:create_staff] Private message from ${source}`);
         // 防护：确保 message 和 message.message 存在
         const userMessage = message?.message || '';
         const userId = source || 'unknown';
@@ -1291,14 +1256,14 @@ async function handleProcessMessage(message, redis, logger, instanceId) {
         if (messageObj) {
             // 所有消息都通过 redis 发送，不通过 deliver
             await redis.publish('wegirl:replies', JSON.stringify(messageObj));
-            console.log(`[hr_manage:create_staff] Message published to wegirl:replies, msgType=${messageObj.msgType}`);
+            console.log(`[hr:create_staff] Message published to wegirl:replies, msgType=${messageObj.msgType}`);
         }
         // 返回 null，deliver 不会发送任何消息
         return null;
     }
     // 2. 群聊 @ 消息 → 判断是 agent 还是人类
     if (chatType === 'group' && mentions && mentions.length > 0) {
-        logger.info(`[hr_manage:create_staff] Group mention message with ${mentions.length} mentions`);
+        logger.info(`[hr:create_staff] Group mention message with ${mentions.length} mentions`);
         const results = [];
         const fromUser = message.source;
         const senderName = message.senderName || message.fromUserName || '';

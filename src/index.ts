@@ -923,6 +923,14 @@ async function handleListAgents(redis: Redis, logger: any): Promise<any> {
   );
 
   const validAgents = agents.filter(a => a !== null);
+  
+  // 按 instanceId 排序
+  validAgents.sort((a: any, b: any) => {
+    if (a.instanceId < b.instanceId) return -1;
+    if (a.instanceId > b.instanceId) return 1;
+    return 0;
+  });
+  
   logger.info(`[hr] Returning ${validAgents.length} agents`);
 
   return {
