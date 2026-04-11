@@ -24,7 +24,19 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.3 (2026-04-09) ⭐ Current
+### v1.0.4 (2026-04-11) ⭐ Current
+
+**HR Tool 稳定性优化与流程简化**:
+- ✅ 工具名统一: `hr_manage` → `hr`
+- ✅ 删除 `sync_agents_to_redis` 功能（避免崩溃）
+- ✅ `create_agent` 简化: 直接重启 OpenClaw 生效，不再注册 Redis
+- ✅ 不再创建 `auth.json` 和 `models.json`
+- ✅ `list_staffs` 增强错误处理（跳过非 hash key）
+- ✅ execute 函数添加 try-catch 防止崩溃
+
+详见 [MILESTONE-v1.0.4.md](./milestones/MILESTONE-v1.0.4.md)
+
+### v1.0.3 (2026-04-09)
 
 **稳定性优化与日志改进**:
 - ✅ 消息去重机制：防止重复发送消息（LRU 缓存，最多 1000 条）
@@ -360,25 +372,49 @@ npm run build
 { status: "accepted", mode: "async" }
 ```
 
-### `hr_manage`
+### `hr`
 
-HR Agent 专用工具（create_staff action）:
+HR Agent 专用工具:
 
 ```javascript
+// 列出花名册
+{
+  action: "list_staffs",
+  replyTo: "tiger",
+  routingId: "..."
+}
+
+// 查询员工
+{
+  action: "get_staff",
+  accountId: "scout",
+  replyTo: "tiger",
+  routingId: "..."
+}
+
+// 创建 Agent
+{
+  action: "create_agent",
+  agentName: "cncplanner",
+  description: "CNC独立站的策划师",
+  replyTo: "tiger",
+  routingId: "..."
+}
+
+// 处理入职
 {
   action: "create_staff",
   message: "用户消息内容",
-  source: "ou_xxx",          // 用户ID (对应 SessionsSendOptions.source)
-  target: "default",         // 目标ID (默认)
-  chatType: "direct",        // 聊天类型: direct/group
-  senderName: "用户名",      // 发送者显示名
-  senderOpenId: "ou_xxx",    // 发送者 OpenId
-  groupId: "chat_xxx",       // 群聊ID (可选)
-  routingId: "routing_xxx"   // 路由追踪ID (可选)
+  source: "ou_xxx",
+  target: "hr",
+  chatType: "direct",
+  senderName: "用户名",
+  groupId: "chat_xxx",
+  routingId: "..."
 }
 ```
 
-详见 [MILESTONE-v2.0.md](./milestones/MILESTONE-v2.0.md) 完整版本历史。
+详见 [MILESTONE-v1.0.4.md](./milestones/MILESTONE-v1.0.4.md) 完整版本历史。
 
 ## 核心模块
 

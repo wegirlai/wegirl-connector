@@ -392,15 +392,24 @@ const plugin = {
 
       // HR Manage Tool - 仅限 HR Agent 使用
       context.registerTool({
-        name: 'hr_manage',
-        description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 同步本地信息到 Redis 使用 sync_agents_to_redis。\n\n**重要提示**：当需要将结果发送给特定用户时，必须传递 replyTo 参数（例如：replyTo: "human:tiger" 或 replyTo: "tiger"）。如果不传递 replyTo，结果将只返回给当前会话。',
+        name: 'hr',
+        description: 'HR Agent 专用：处理新成员入职、查看团队花名册、查询员工信息、管理Agent性格和能力、创建新Agent。使用场景：1) 处理新员工入职使用 create_staff；2) 查看所有员工使用 list_staffs；3) 查询特定员工信息使用 get_staff；4) 更新Agent性格和能力使用 update_agent_profile；5) 获取Agent详细档案使用 get_agent_profile；6) 创建新 Agent 使用 create_agent（示例：创建 agent：cncplanner，CNC独立站的策划师）。\n\n**重要提示**：当需要将结果发送给特定用户时，必须传递 replyTo 参数（例如：replyTo: "human:tiger" 或 replyTo: "tiger"）。如果不传递 replyTo，结果将只返回给当前会话。',
         parameters: {
           type: 'object',
           properties: {
             action: {
               type: 'string',
-              enum: ['list_staffs', 'get_staff', 'sync_agents_to_redis', 'send_command', 'create_staff', 'update_agent_profile', 'get_agent_profile'],
+              enum: ['list_staffs', 'get_staff', 'send_command', 'create_staff', 'create_agent', 'update_agent_profile', 'get_agent_profile'],
               description: '操作类型'
+            },
+            // 用于 create_agent
+            agentName: {
+              type: 'string',
+              description: 'Agent 名称（create_agent 时使用，如：cncplanner）'
+            },
+            description: {
+              type: 'string',
+              description: 'Agent 职责描述（create_agent 时使用，如：CNC独立站的策划师）'
             },
             // 用于 get_staff, get_agent_profile, update_agent_profile
             accountId: {
@@ -472,7 +481,7 @@ const plugin = {
           required: ['action']
         },
         execute: async (_toolCallId: string, params: any) => {
-          console.log(`[hr_manage] 被调用, params=${JSON.stringify(params)}`);
+          console.log(`[hr] 被调用, params=${JSON.stringify(params)}`);
 
           await initRedis();
           if (!redisClient) throw new Error('Redis not initialized');
@@ -487,7 +496,7 @@ const plugin = {
           const rawReplyTo = params.replyTo || params.source;
           const replyTo = Array.isArray(rawReplyTo) ? rawReplyTo[0] : rawReplyTo;
           
-          logger?.info?.(`[hr_manage] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
+          logger?.info?.(`[hr] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
           const isSyncMode = params.timeoutSeconds > 0;
 
           let result: any;
@@ -534,9 +543,6 @@ const plugin = {
             case 'update_agent_profile':
               result = await handleUpdateAgentProfile(params, redisClient, logger);
               break;
-            case 'sync_agents_to_redis':
-              result = await handleSyncAgents(redisClient, logger);
-              break;
             case 'send_command': {
               const { command, payload: cmdPayload } = params;
               if (!command) {
@@ -550,11 +556,48 @@ const plugin = {
               );
               break;
             }
+            case 'create_agent': {
+              const { agentName, description: agentDescription } = params;
+              if (!agentName) {
+                throw new Error('缺少必填参数: agentName（如：cncplanner）');
+              }
+
+              logger.info(`[hr:create_agent] 创建 Agent: ${agentName}, 描述: ${agentDescription || '无'}`);
+
+              // 导入 executeCreateAgent
+              const { executeCreateAgent } = await import('./hr-manage-core.js');
+
+              const createResult = await executeCreateAgent(
+                {
+                  agentName: agentName.toLowerCase(),
+                  accountId: agentName.toLowerCase(),
+                  instanceId: INSTANCE_ID,
+                  capabilities: [agentName.toLowerCase(), 'wegirl_send'],
+                  role: agentDescription || '-'
+                },
+                {
+                  instanceId: INSTANCE_ID,
+                  logger,
+                  redis: redisClient
+                }
+              );
+
+              result = {
+                success: createResult.success,
+                action: 'create_agent',
+                agentName: createResult.agentName,
+                accountId: createResult.accountId,
+                workspacePath: createResult.metadata.workspacePath,
+                steps: createResult.steps,
+                error: createResult.error
+              };
+              break;
+            }
             default:
               throw new Error(`未知操作: ${action}`);
           }
 
-          logger.info(`[hr_manage] action=${action} 执行完成`);
+          logger.info(`[hr] action=${action} 执行完成`);
 
           // create_staff 已通过 redis 发送消息，返回 null 阻止 deliver
           if (action === 'create_staff') {
@@ -564,7 +607,7 @@ const plugin = {
           // === 主动回复逻辑 ===
           // 如果 replyTo 存在且不是自己，主动发送结果给 replyTo
           if (replyTo && replyTo !== 'hr' && !replyTo.includes('hr')) {
-            logger.info(`[hr_manage] 检测到 replyTo=${replyTo}，准备主动发送结果`);
+            logger.info(`[hr] 检测到 replyTo=${replyTo}，准备主动发送结果`);
             
             try {
               // 动态导入 wegirlSend 避免循环依赖
@@ -585,12 +628,12 @@ const plugin = {
                 chatType: 'direct'
               }, logger);
               
-              logger.info(`[hr_manage] 已主动发送结果给 ${replyTo}`);
+              logger.info(`[hr] 已主动发送结果给 ${replyTo}`);
               
               // 主动发送后，返回 null 防止再次发送
               return null;
             } catch (err: any) {
-              logger.error(`[hr_manage] 主动发送失败: ${err.message}`);
+              logger.error(`[hr] 主动发送失败: ${err.message}`);
               // 发送失败，返回正常结果
             }
           }
@@ -867,57 +910,78 @@ interface CreateAgentArgs {
  * 列出所有 Agents (使用统一的 staff key)
  */
 async function handleListAgents(redis: Redis, logger: any): Promise<any> {
-  logger.info('[hr_manage] Listing all agents');
+  logger.info('[hr] Listing all agents');
 
   const KEY_PREFIX = 'wegirl:';
-  // 获取所有 staff，过滤出 agent 类型
+  // 获取所有 staff，过滤出纯 staff key（排除 :position, :by-type: 等后缀）
   const keys = await redis.keys(`${KEY_PREFIX}staff:*`);
-  const staffKeys = keys.filter(k => !k.includes(':by-type:') && !k.includes(':capability:') && !k.includes(':personality:'));
+  const staffKeys = keys.filter(k => {
+    // 只保留 wegirl:staff:xxx 格式，排除 wegirl:staff:xxx:position 等
+    const parts = k.split(':');
+    return parts.length === 3 && !k.includes(':by-type:') && !k.includes(':capability:') && !k.includes(':personality:');
+  });
+
+  logger.info(`[hr] Found ${staffKeys.length} staff keys: ${staffKeys.join(', ')}`);
 
   const agents = await Promise.all(
     staffKeys.map(async (key) => {
-      const data = await redis.hgetall(key);
-      // 只返回 agent 类型
-      if (data.type !== 'agent') return null;
-
-      // 解析性格和能力
-      let personalityVibe = '-';
-      let capabilities: string[] = [];
       try {
-        if (data.personality) {
-          const p = JSON.parse(data.personality);
-          personalityVibe = p.vibe || p.style || '-';
+        // 先检查 key 类型
+        const keyType = await redis.type(key);
+        if (keyType !== 'hash') {
+          logger.warn(`[hr] Skipping non-hash key: ${key} (type: ${keyType})`);
+          return null;
         }
-      } catch (e) {
-        // ignore
-      }
-      try {
-        if (data.capabilities) {
-          capabilities = JSON.parse(data.capabilities);
-        }
-      } catch (e) {
-        capabilities = data.capabilities?.split(',').filter(Boolean) || [];
-      }
 
-      return {
-        accountId: data.staffId,
-        name: data.name,
-        type: data.type,
-        role: data.role || '-',
-        instanceId: data.instanceId,
-        status: data.status,
-        personalityVibe,
-        capabilities: capabilities.slice(0, 3), // 只显示前3个能力
-        capabilityCount: capabilities.length,
-        lastHeartbeat: data.lastHeartbeat
-      };
+        const data = await redis.hgetall(key);
+        // 只返回 agent 类型
+        if (data.type !== 'agent') return null;
+
+        // 解析性格和能力
+        let personalityVibe = '-';
+        let capabilities: string[] = [];
+        try {
+          if (data.personality) {
+            const p = JSON.parse(data.personality);
+            personalityVibe = p.vibe || p.style || '-';
+          }
+        } catch (e) {
+          // ignore
+        }
+        try {
+          if (data.capabilities) {
+            capabilities = JSON.parse(data.capabilities);
+          }
+        } catch (e) {
+          capabilities = data.capabilities?.split(',').filter(Boolean) || [];
+        }
+
+        return {
+          accountId: data.staffId,
+          name: data.name,
+          type: data.type,
+          role: data.role || '-',
+          instanceId: data.instanceId,
+          status: data.status,
+          personalityVibe,
+          capabilities: capabilities.slice(0, 3), // 只显示前3个能力
+          capabilityCount: capabilities.length,
+          lastHeartbeat: data.lastHeartbeat
+        };
+      } catch (err: any) {
+        logger.error(`[hr] Error reading key ${key}: ${err.message}`);
+        return null;
+      }
     })
   );
 
+  const validAgents = agents.filter(a => a !== null);
+  logger.info(`[hr] Returning ${validAgents.length} agents`);
+
   return {
     success: true,
-    count: agents.filter(a => a !== null).length,
-    agents: agents.filter(a => a !== null)
+    count: validAgents.length,
+    agents: validAgents
   };
 }
 
@@ -926,7 +990,7 @@ async function handleListAgents(redis: Redis, logger: any): Promise<any> {
  */
 async function handleGetAgent(args: any, redis: Redis, logger: any): Promise<any> {
   const { accountId } = args;
-  logger.info(`[hr_manage] Getting agent: ${accountId}`);
+  logger.info(`[hr] Getting agent: ${accountId}`);
 
   const KEY_PREFIX = 'wegirl:';
   const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
@@ -961,7 +1025,7 @@ async function handleGetAgentProfile(args: any, redis: Redis, logger: any): Prom
     return { success: false, error: '缺少必填参数: accountId' };
   }
 
-  logger.info(`[hr_manage] Getting agent profile: ${accountId}`);
+  logger.info(`[hr] Getting agent profile: ${accountId}`);
 
   const KEY_PREFIX = 'wegirl:';
   const data = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
@@ -978,7 +1042,7 @@ async function handleGetAgentProfile(args: any, redis: Redis, logger: any): Prom
       personality = JSON.parse(data.personality);
     }
   } catch (e) {
-    logger.warn(`[hr_manage] Failed to parse personality for ${accountId}`);
+    logger.warn(`[hr] Failed to parse personality for ${accountId}`);
   }
 
   try {
@@ -1024,7 +1088,7 @@ async function handleUpdateAgentProfile(args: any, redis: Redis, logger: any): P
     return { success: false, error: '缺少必填参数: profile' };
   }
 
-  logger.info(`[hr_manage] Updating agent profile: ${accountId}`);
+  logger.info(`[hr] Updating agent profile: ${accountId}`);
 
   const KEY_PREFIX = 'wegirl:';
   const key = `${KEY_PREFIX}staff:${accountId}`;
@@ -1108,7 +1172,7 @@ async function handleUpdateAgentProfile(args: any, redis: Redis, logger: any): P
 
   await pipeline.exec();
 
-  logger.info(`[hr_manage] Agent profile updated: ${accountId}`);
+  logger.info(`[hr] Agent profile updated: ${accountId}`);
 
   return {
     success: true,
@@ -1123,7 +1187,7 @@ async function handleUpdateAgentProfile(args: any, redis: Redis, logger: any): P
  */
 async function handleDeleteAgent(args: any, redis: Redis, logger: any): Promise<any> {
   const { accountId } = args;
-  logger.info(`[hr_manage] Deleting agent: ${accountId}`);
+  logger.info(`[hr] Deleting agent: ${accountId}`);
 
   const KEY_PREFIX = 'wegirl:';
 
@@ -1150,7 +1214,7 @@ async function handleDeleteAgent(args: any, redis: Redis, logger: any): Promise<
   // 删除 staff 信息
   await redis.del(`${KEY_PREFIX}staff:${accountId}`);
 
-  logger.info(`[hr_manage] Agent ${accountId} deleted from Redis`);
+  logger.info(`[hr] Agent ${accountId} deleted from Redis`);
 
   return {
     success: true,
@@ -1166,34 +1230,11 @@ function getInstanceIdFromConfig(logger?: any): string {
     const configPath = getOpenClawConfigPath();
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const instanceId = config.plugins?.wegirl?.config?.instanceId || 'instance-local';
-    logger?.info?.(`[hr_manage] Got instanceId from openclaw.json: ${instanceId}`);
+    logger?.info?.(`[hr] Got instanceId from openclaw.json: ${instanceId}`);
     return instanceId;
   } catch (err: any) {
-    logger?.error?.(`[hr_manage] Failed to read instanceId from config: ${err.message}`);
+    logger?.error?.(`[hr] Failed to read instanceId from config: ${err.message}`);
     return 'instance-local';
-  }
-}
-
-/**
- * 手动同步所有本地 Agents 到 Redis
- */
-async function handleSyncAgents(redis: Redis, logger: any): Promise<any> {
-  const INSTANCE_ID = getInstanceIdFromConfig(logger);
-  logger.info(`[hr_manage] Starting manual agent sync to Redis for instance: ${INSTANCE_ID}`);
-
-  try {
-    const result = await syncAgentsFromLocal(INSTANCE_ID, redis, logger);
-    return {
-      success: true,
-      message: `同步完成: ${result.kept} 个保持, ${result.removed} 个清理, 新增 ${result.registered || 0} 个`,
-      details: result
-    };
-  } catch (err: any) {
-    logger.error('[hr_manage] Sync failed:', err.message);
-    return {
-      success: false,
-      message: `同步失败: ${err.message}`
-    };
   }
 }
 
@@ -1849,20 +1890,35 @@ function formatResultForReply(action: string, result: any): string {
       return `✅ ${result.message}`;
     }
 
-    case 'sync_agents_to_redis': {
-      if (!result.success) {
-        return `❌ 同步失败: ${result.message}`;
-      }
-      return `✅ ${result.message}`;
-    }
-
     case 'send_command': {
       if (!result.success) {
         return `❌ 命令发送失败: ${result.error || '未知错误'}`;
       }
       return `✅ ${result.message}`;
     }
-    
+
+    case 'create_agent': {
+      if (!result.success) {
+        return `❌ 创建 Agent 失败: ${result.error || '未知错误'}`;
+      }
+
+      const lines = ['🤖 Agent 创建结果', ''];
+      lines.push(`名称: ${result.agentName}`);
+      lines.push(`账号: ${result.accountId}`);
+      lines.push(`工作目录: ${result.workspacePath}`);
+      lines.push('');
+
+      if (result.steps && result.steps.length > 0) {
+        lines.push('执行步骤:');
+        result.steps.forEach((step: any) => {
+          const icon = step.status === 'success' ? '✅' : '❌';
+          lines.push(`  ${icon} ${step.name}${step.message ? `: ${step.message}` : ''}`);
+        });
+      }
+
+      return lines.join('\n');
+    }
+
     default:
       return JSON.stringify(result, null, 2);
   }

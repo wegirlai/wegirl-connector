@@ -19,9 +19,9 @@ export interface CreateAgentResult {
     steps: StepResult[];
     metadata: {
         workspacePath: string;
+        agentDirPath: string;
         configUpdated: boolean;
-        redisRegistered: boolean;
-        streamed: boolean;
+        restartOpenclaw: boolean;
     };
     error?: string;
 }
