@@ -4,20 +4,14 @@ import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
-import { MessageRouter } from './router.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
-import { executeCreateAgent } from './hr-manage-core.js';
-import { checkIsAgent, handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
+import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
 import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, loadOpenClawConfig } from './config.js';
-import type { MessageEnvelope } from './protocol.js';
 import type {
-  PluginConfig,
-  EventPayload,
-  PluginContext,
-  ServiceConfig,
+  PluginContext
 } from './types.js';
 
 let accountsCache: Map<string, any> = new Map();
@@ -100,7 +94,7 @@ let redisConnectPromise: Promise<void> | null = null;
 let hasSyncedAgents = false;  // 确保 syncAgentsFromLocal 只执行一次
 let registry: Registry | null = null;
 let pendingQueue: PendingQueue | null = null;
-let messageRouter: MessageRouter | null = null;
+//let messageRouter: MessageRouter | null = null;
 let wegirlTools: WeGirlTools | null = null;
 
 // 全局单例控制 - 确保只有一个 Stream 消费者
@@ -206,12 +200,12 @@ const plugin = {
         // 初始化队列和路由器
         if (redisClient) {
           pendingQueue = new PendingQueue(redisClient);
-          messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger, url, password);
+          //messageRouter = new MessageRouter(redisClient, INSTANCE_ID, logger, url, password);
           wegirlTools = new WeGirlTools(redisClient, INSTANCE_ID, logger);
 
           // 启动跨实例消息监听
-          await messageRouter.startListening();
-          logger.info('[WeGirl register] Cross-instance message listener started');
+          //await messageRouter.startListening();
+          //logger.info('[WeGirl register] Cross-instance message listener started');
 
           // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent（只执行一次）
           if (!hasSyncedAgents) {
@@ -226,7 +220,7 @@ const plugin = {
 
               // 注册到 Registry（只做初始注册，不启动定时心跳）
               registry = new Registry(redisClient, INSTANCE_ID, logger);
-              
+
               // 一次性注册所有本地 agent（不启动定时心跳）
               const localAgents = await getLocalAgents(logger);
               for (const agent of localAgents) {
@@ -240,7 +234,7 @@ const plugin = {
                 }
               }
               logger.info(`[WeGirl register] Agents registered: ${localAgents.length}`);
-              
+
               // 发送插件注册成功事件到 wegirl:events
               if (redisClient && redisClient.status === 'ready') {
                 const eventData = {
@@ -495,8 +489,8 @@ const plugin = {
           // 优先使用传入的 replyTo，如果没有则尝试从消息上下文中获取
           const rawReplyTo = params.replyTo || params.source;
           const replyTo = Array.isArray(rawReplyTo) ? rawReplyTo[0] : rawReplyTo;
-          
-          logger?.info?.(`[hr] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
+
+          logger?.info?.(`[hr_manage] 处理 action=${action}, replyTo=${replyTo}, routingId=${routingId}`);
           const isSyncMode = params.timeoutSeconds > 0;
 
           let result: any;
@@ -607,16 +601,16 @@ const plugin = {
           // === 主动回复逻辑 ===
           // 如果 replyTo 存在且不是自己，主动发送结果给 replyTo
           if (replyTo && replyTo !== 'hr' && !replyTo.includes('hr')) {
-            logger.info(`[hr] 检测到 replyTo=${replyTo}，准备主动发送结果`);
-            
+            logger.info(`[hr_manage] 检测到 replyTo=${replyTo}，准备主动发送结果`);
+
             try {
               // 动态导入 wegirlSend 避免循环依赖
               const { wegirlSend } = await import('./core/send.js');
-              
+
               const replyMessage = formatResultForReply(action, result);
-              const targetType = replyTo.startsWith('source:') || replyTo.startsWith('ou_') 
+              const targetType = replyTo.startsWith('source:') || replyTo.startsWith('ou_')
                 ? 'A2H' : 'A2A';
-              
+
               // 发送给 replyTo
               await wegirlSend({
                 flowType: targetType,
@@ -627,9 +621,9 @@ const plugin = {
                 routingId: routingId || `hr-reply-${Date.now()}`,
                 chatType: 'direct'
               }, logger);
-              
-              logger.info(`[hr] 已主动发送结果给 ${replyTo}`);
-              
+
+              logger.info(`[hr_manage] 已主动发送结果给 ${replyTo}`);
+
               // 主动发送后，返回 null 防止再次发送
               return null;
             } catch (err: any) {
@@ -1596,7 +1590,7 @@ async function startGlobalStreamConsumer(
   const password = config.redisPassword;
   const url = config.redisUrl || 'redis://localhost:6379';
   const consumerName = `consumer-${instanceId}`;
-  
+
   // 按实例分 Stream: wegirl:stream:global:{instanceId}
   const GLOBAL_STREAM_KEY = `${KEY_PREFIX}stream:global:${instanceId}`;
 
@@ -1680,7 +1674,7 @@ async function startGlobalStreamConsumer(
               // 失败也要 ACK，避免无限重试
               try {
                 await globalStreamClient!.xack(GLOBAL_STREAM_KEY, GLOBAL_CONSUMER_GROUP, messageId);
-              } catch {}
+              } catch { }
             }
           }
         }
