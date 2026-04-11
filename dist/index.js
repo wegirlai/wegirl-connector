@@ -216,6 +216,22 @@ const plugin = {
                                 };
                                 await redisClient.publish('wegirl:events', JSON.stringify(eventData));
                                 logger.info('[WeGirl register] Plugin registration event sent to wegirl:events');
+                                // 发送初始化消息到 wegirl:init，通知 wegirl-service 同步 agents
+                                // 不包含 agents 列表，service 会自己去 Redis 获取
+                                const initData = {
+                                    id: randomUUID(),
+                                    type: 'init',
+                                    timestamp: Date.now().toString(),
+                                    payload: JSON.stringify({
+                                        instanceId: INSTANCE_ID,
+                                        timestamp: new Date().toISOString()
+                                    }),
+                                    sessionId: 'global',
+                                    userId: 'system',
+                                    instanceId: INSTANCE_ID,
+                                };
+                                await redisClient.publish('wegirl:init', JSON.stringify(initData));
+                                logger.info('[WeGirl register] Init message sent to wegirl:init');
                             }
                         }
                         catch (syncErr) {

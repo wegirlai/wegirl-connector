@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.4 (2026-04-11) ⭐ Current
+### v1.0.5 (2026-04-11) ⭐ Current
+
+**list_staffs 支持人类员工**:
+- ✅ 返回所有员工（Agents + Humans）
+- ✅ 按实例分组展示：`wegirl001 实例：`
+- ✅ 每行显示单个成员：🤖 name - role 🟢
+- ✅ 在线状态图标：🟢 在线 / ⚪ 离线
+- ✅ 底部统计：共 N 位成员（🤖 X / 👤 Y）
+
+详见 [MILESTONE-v1.0.5.md](./milestones/MILESTONE-v1.0.5.md)
+
+### v1.0.4 (2026-04-11)
 
 **HR Tool 稳定性优化与流程简化**:
 - ✅ 工具名统一: `hr_manage` → `hr`
