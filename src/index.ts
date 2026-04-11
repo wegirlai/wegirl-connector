@@ -1775,7 +1775,6 @@ function formatResultForReply(action: string, result: any): string {
       
       // 🤖 Robots (Agents)
       if (agentList.length > 0) {
-        lines.push('🤖 Robots');
         // 按 instanceId 分组
         const agentGroups: Record<string, any[]> = {};
         agentList.forEach((a: any) => {
@@ -1785,18 +1784,18 @@ function formatResultForReply(action: string, result: any): string {
         });
         
         Object.keys(agentGroups).sort().forEach(instanceId => {
-          const names = agentGroups[instanceId].map((a: any) => {
+          lines.push(`${instanceId} 实例：`);
+          agentGroups[instanceId].forEach((a: any) => {
             const status = a.status === 'online' ? '🟢' : '⚪';
-            return `${a.name || a.accountId}${status}`;
-          }).join(', ');
-          lines.push(`  [${instanceId}] ${names}`);
+            const role = a.role && a.role !== '-' ? ` - ${a.role}` : '';
+            lines.push(`🤖 ${a.name || a.accountId}${role} ${status}`);
+          });
+          lines.push('');
         });
-        lines.push('');
       }
       
       // 👤 Humans
       if (humanList.length > 0) {
-        lines.push('👤 Humans');
         // 按 instanceId 分组
         const humanGroups: Record<string, any[]> = {};
         humanList.forEach((h: any) => {
@@ -1806,13 +1805,14 @@ function formatResultForReply(action: string, result: any): string {
         });
         
         Object.keys(humanGroups).sort().forEach(instanceId => {
-          const names = humanGroups[instanceId].map((h: any) => {
+          lines.push(`${instanceId} 实例：`);
+          humanGroups[instanceId].forEach((h: any) => {
             const status = h.status === 'online' ? '🟢' : '⚪';
-            return `${h.name || h.accountId}${status}`;
-          }).join(', ');
-          lines.push(`  [${instanceId}] ${names}`);
+            const role = h.role && h.role !== '-' ? ` - ${h.role}` : '';
+            lines.push(`👤 ${h.name || h.accountId}${role} ${status}`);
+          });
+          lines.push('');
         });
-        lines.push('');
       }
 
       lines.push(`共 ${agents.length} 位成员（🤖 ${agentList.length} / 👤 ${humanList.length}）`);
