@@ -1496,43 +1496,51 @@ function formatResultForReply(action, result) {
             if (agents.length === 0) {
                 return '📋 团队花名册\n\n暂无成员';
             }
-            // 按 instanceId 分组
-            const groups = {};
-            agents.forEach((staff) => {
-                const instanceId = staff.instanceId || 'unknown';
-                if (!groups[instanceId]) {
-                    groups[instanceId] = { agents: [], humans: [] };
-                }
-                if (staff.type === 'human') {
-                    groups[instanceId].humans.push(staff);
-                }
-                else {
-                    groups[instanceId].agents.push(staff);
-                }
-            });
+            // 分离 Agents 和 Humans
+            const agentList = agents.filter((s) => s.type === 'agent');
+            const humanList = agents.filter((s) => s.type === 'human');
             const lines = ['📋 团队花名册', ''];
-            lines.push('Instance | Agents | Humans');
-            lines.push('--- | --- | ---');
-            Object.keys(groups).sort().forEach(instanceId => {
-                const group = groups[instanceId];
-                // 格式化 Agents: name(🟢), name...
-                const agentsStr = group.agents.length > 0
-                    ? group.agents.map((a) => {
+            // 🤖 Robots (Agents)
+            if (agentList.length > 0) {
+                lines.push('🤖 Robots');
+                // 按 instanceId 分组
+                const agentGroups = {};
+                agentList.forEach((a) => {
+                    const instanceId = a.instanceId || 'unknown';
+                    if (!agentGroups[instanceId])
+                        agentGroups[instanceId] = [];
+                    agentGroups[instanceId].push(a);
+                });
+                Object.keys(agentGroups).sort().forEach(instanceId => {
+                    const names = agentGroups[instanceId].map((a) => {
                         const status = a.status === 'online' ? '🟢' : '⚪';
-                        return `${a.name || a.accountId}(${status})`;
-                    }).join(', ')
-                    : '-';
-                // 格式化 Humans: name(🟢), name...
-                const humansStr = group.humans.length > 0
-                    ? group.humans.map((h) => {
+                        return `${a.name || a.accountId}${status}`;
+                    }).join(', ');
+                    lines.push(`  [${instanceId}] ${names}`);
+                });
+                lines.push('');
+            }
+            // 👤 Humans
+            if (humanList.length > 0) {
+                lines.push('👤 Humans');
+                // 按 instanceId 分组
+                const humanGroups = {};
+                humanList.forEach((h) => {
+                    const instanceId = h.instanceId || 'unknown';
+                    if (!humanGroups[instanceId])
+                        humanGroups[instanceId] = [];
+                    humanGroups[instanceId].push(h);
+                });
+                Object.keys(humanGroups).sort().forEach(instanceId => {
+                    const names = humanGroups[instanceId].map((h) => {
                         const status = h.status === 'online' ? '🟢' : '⚪';
-                        return `${h.name || h.accountId}(${status})`;
-                    }).join(', ')
-                    : '-';
-                lines.push(`${instanceId} | ${agentsStr} | ${humansStr}`);
-            });
-            lines.push('');
-            lines.push(`共 ${agents.length} 位成员`);
+                        return `${h.name || h.accountId}${status}`;
+                    }).join(', ');
+                    lines.push(`  [${instanceId}] ${names}`);
+                });
+                lines.push('');
+            }
+            lines.push(`共 ${agents.length} 位成员（🤖 ${agentList.length} / 👤 ${humanList.length}）`);
             return lines.join('\n');
         }
         case 'get_staff': {
