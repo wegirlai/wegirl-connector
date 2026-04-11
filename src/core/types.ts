@@ -29,22 +29,22 @@ export const SPECIAL_STAFF = {
 export interface WeGirlSendOptions {
   /** 流向类型 */
   flowType: FlowType;
-  
+
   /** 来源 StaffId（必填） */
   source: StaffId;
-  
+
   /** 目标 StaffId（必填） */
   target: StaffId;
-  
+
   /** 消息内容 */
   message: string;
-  
+
   /** 聊天类型（可选，默认 direct） */
   chatType?: ChatType;
-  
+
   /** 群聊ID（chatType='group' 时必填） */
   groupId?: string;
-  
+
   /** 
    * 回复目标（可选）
    * - undefined: 使用默认值
@@ -52,19 +52,19 @@ export interface WeGirlSendOptions {
    * - string[]: 多个目标
    */
   replyTo?: StaffId | StaffId[];
-  
+
   /** 任务ID（可选，如有则全程携带） */
   taskId?: string;
-  
+
   /** 步骤ID（可选） */
   stepId?: string;
-  
+
   /** 步骤总 Agent 数 */
   stepTotalAgents?: number;
-  
+
   /** 路由追踪ID（可选） */
   routingId?: string;
-  
+
   /** 
    * 消息类型（可选，默认 'message'）
    * - 'message': 普通消息
@@ -72,16 +72,16 @@ export interface WeGirlSendOptions {
    * - 'sync_agent': 同步 agent 命令
    */
   msgType?: string;
-  
+
   /** 
    * 额外载荷（可选）
    * 用于 HR 命令等场景，传递结构化数据
    */
   payload?: Record<string, any>;
-  
+
   /** 扩展元数据（可选） */
   metadata?: Record<string, any>;
-  
+
   /**
    * 超时秒数（可选，默认 0）
    * - 0: 异步发送，立即返回
@@ -110,7 +110,7 @@ export interface StaffInfo {
 export interface SendResult {
   success: boolean;
   routingId: string;
-  local: boolean;           // 是否本地处理
+  local?: boolean;           // 是否本地处理
   targetInstanceId?: string;
   error?: string;
   // 同步模式额外字段
