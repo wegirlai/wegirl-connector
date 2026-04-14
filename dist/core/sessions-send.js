@@ -74,6 +74,10 @@ async function determineFlowType(redis, src, tgt, log) {
         getStaffType(tgt)
     ]);
     log?.info?.(`[determineFlowType] Staff types: source=${src}(${sourceType}), target=${tgt}(${targetType})`);
+    // 同 ID 是 S2S（自己给自己）
+    if (src === tgt) {
+        return 'S2S';
+    }
     if (sourceType === 'human' && targetType === 'agent')
         return 'H2A';
     if (sourceType === 'agent' && targetType === 'human')
@@ -101,7 +105,8 @@ function reverseFlowType(flowType) {
         'H2A': 'A2H',
         'A2H': 'H2A',
         'A2A': 'A2A',
-        'H2H': 'H2H'
+        'H2H': 'H2H',
+        'S2S': 'S2S',
     };
     return map[flowType] || flowType;
 }
@@ -394,6 +399,16 @@ async function handleAgentReply(params) {
             }
             console.log(`[handleAgentReply]`, JSON.stringify(replyMessage, null, 2));
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
+            // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
+            if (originalMetadata?.from === 'world') {
+                try {
+                    await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(replyMessage));
+                    log?.info?.(`[handleAgentReply] from=world message also sent to wegirl:stream:world from ${target}`);
+                }
+                catch (streamErr) {
+                    log?.error?.(`[handleAgentReply] Failed to send to world stream: ${streamErr.message}`);
+                }
+            }
         }
         log?.info?.(`[handleAgentReply] Reply published to wegirl:replies, flowType=${reverseFlowType(flowType)}, timeoutSeconds=${timeoutSeconds}`);
     }
@@ -470,11 +485,16 @@ async function processMessage(options) {
     const logPrefix = `[WeGirl SessionsSend ${sessionKey}]`;
     log?.info?.(`${logPrefix} Route resolved: agentId=${agentId}, sessionKey=${sessionKey}, matchedBy=${route.matchedBy}`);
     // ========== 3. 确定 flowType 并发送 Redis 消息 ==========
-    let flowType = 'H2A';
+    let flowType = options.flowType || 'H2A';
     try {
         const redis = await getRedisPublisher(cfg);
-        flowType = await determineFlowType(redis, source, target, log);
-        log?.info?.(`${logPrefix} Flow type determined: ${flowType}`);
+        if (!options.flowType) {
+            flowType = await determineFlowType(redis, source, target, log);
+            log?.info?.(`${logPrefix} Flow type determined: ${flowType}`);
+        }
+        else {
+            log?.info?.(`${logPrefix} Flow type from message: ${flowType}`);
+        }
         // 发送 Redis 消息（使用标准 V2 格式）
         const forwardMsg = buildMessage({
             flowType,

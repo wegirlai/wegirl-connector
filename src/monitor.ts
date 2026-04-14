@@ -138,6 +138,7 @@ export async function monitorWeGirlProvider(params: MonitorParams): Promise<void
               payload: msg.payload,
               metadata: msg.metadata,
               replyTo: msg.replyTo,
+              flowType: msg.flowType,  // 传递原始 flowType
               fromType: 'outer',
               cfg,
               channel: 'wegirl',

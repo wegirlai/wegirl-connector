@@ -25,6 +25,8 @@ interface SessionsSendOptions {
     metadata?: any;
     /** 回复目标 */
     replyTo?: string;
+    /** 消息流向类型 */
+    flowType?: string;
     /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
     fromType?: 'inner' | 'outer';
     cfg: any;

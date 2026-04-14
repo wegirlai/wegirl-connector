@@ -495,10 +495,7 @@ export async function executeCreateAgent(
     const pluginCfg = config?.plugins?.entries?.wegirl?.config || {};
     
     config.channels.wegirl.accounts[accountId] = {
-      enabled: true,
-      redisUrl: pluginCfg?.redisUrl || 'redis://localhost:6379',
-      redisPassword: pluginCfg?.redisPassword,
-      redisDb: pluginCfg?.redisDb ?? 1
+      enabled: true
     };
 
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));

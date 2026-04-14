@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.5 (2026-04-11) ⭐ Current
+### v1.0.6 (2026-04-14) ⭐ Current
+
+**`from` 字段协议升级**:
+- ✅ 新增 `from` 字段标识消息来源系统（`world` / `service` / `dashboard`）
+- ✅ Agent 回复路由从 `flowType === "S2S"` 改为 `from === "world"`
+- ✅ world 回复自动多发到 `wegirl:stream:world`
+- ✅ 语义更清晰，扩展性更好
+
+详见 [MILESTONE-v1.0.6.md](./milestones/MILESTONE-v1.0.6.md)
+
+### v1.0.5 (2026-04-11)
 
 **list_staffs 支持人类员工**:
 - ✅ 返回所有员工（Agents + Humans）
