@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.6 (2026-04-14) ⭐ Current
+### v1.0.7 (2026-04-20) ⭐ Current
+
+**JSON Schema 响应支持 + NPC 类型 + HR 结果美化**:
+- ✅ 新增 `responseSchema` 元数据，自动注入 `[JSON_MODE]` 提示
+- ✅ 支持 `type: 'npc'` 的 Staff 类型，花名册显示 🎭 NPC 分组
+- ✅ `list_staffs` 结果格式化：从 JSON 转为易读文本，按实例分组
+- ✅ 统计新增 NPC 数量：🤖 X / 👤 Y / 🎭 Z
+
+详见 [MILESTONE-v1.0.7.md](./milestones/MILESTONE-v1.0.7.md)
+
+### v1.0.6 (2026-04-14)
 
 **`from` 字段协议升级**:
 - ✅ 新增 `from` 字段标识消息来源系统（`world` / `service` / `dashboard`）
