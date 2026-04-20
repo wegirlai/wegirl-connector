@@ -129,6 +129,11 @@ function inferMediaType(url) {
     };
     return mimeMap[ext || ''] || 'application/octet-stream';
 }
+// 添加 schema 转 prompt 函数
+function schemaToCompactPrompt(schema) {
+    // 把 schema 序列化成紧凑的 JSON 示例
+    return `[JSON_MODE]以纯JSON返回，严格匹配格式：${JSON.stringify(schema)}。只返回JSON，无其他文字。`;
+}
 /**
  * 处理 Agent 回复的核心逻辑（在 deliver 回调中调用）
  */
@@ -452,7 +457,13 @@ export async function wegirlSessionsSend(options) {
  * 实际处理消息的函数 (原 wegirlSessionsSend 逻辑)
  */
 async function processMessage(options) {
-    const { message, cfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, metadata: originalMetadata, replyTo } = options;
+    const { message: originalMessage, cfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, metadata: originalMetadata, replyTo } = options;
+    // 处理 message，如果有 responseSchema 则注入 JSON_MODE prompt
+    let message = originalMessage;
+    if (originalMetadata?.responseSchema) {
+        const jsonPrompt = schemaToCompactPrompt(originalMetadata.responseSchema);
+        message = `${jsonPrompt}\n\n${originalMessage}`;
+    }
     const chatId = groupId || target;
     const agentCount = stepTotalAgents;
     const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
@@ -579,6 +590,11 @@ async function processMessage(options) {
         OriginatingChannel: channel,
         OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
         Model: 'kimi-coding/k2p5',
+        Metadata: {
+            ...originalMetadata,
+            responseSchema: originalMetadata?.responseSchema,
+            expectJson: !!originalMetadata?.responseSchema,
+        },
         ...mediaPayload,
     });
     log?.info?.(`${logPrefix} Dispatching to agent (session=${sessionKey}, replyTo=${channel}:${target})`);

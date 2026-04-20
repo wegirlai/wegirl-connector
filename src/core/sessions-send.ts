@@ -187,6 +187,12 @@ function inferMediaType(url: string): string {
   return mimeMap[ext || ''] || 'application/octet-stream';
 }
 
+// 添加 schema 转 prompt 函数
+function schemaToCompactPrompt(schema: any): string {
+  // 把 schema 序列化成紧凑的 JSON 示例
+  return `[JSON_MODE]以纯JSON返回，严格匹配格式：${JSON.stringify(schema)}。只返回JSON，无其他文字。`;
+}
+
 /**
  * 处理 Agent 回复的核心逻辑（在 deliver 回调中调用）
  */
@@ -559,10 +565,17 @@ export async function wegirlSessionsSend(options: SessionsSendOptions): Promise<
  */
 async function processMessage(options: SessionsSendOptions): Promise<void> {
   const {
-    message, cfg, channel, target, source, groupId, chatType, log,
+    message: originalMessage, cfg, channel, target, source, groupId, chatType, log,
     taskId, stepTotalAgents, stepId, routingId: originalRoutingId,
     msgType, metadata: originalMetadata, replyTo
   } = options;
+
+  // 处理 message，如果有 responseSchema 则注入 JSON_MODE prompt
+  let message = originalMessage;
+  if (originalMetadata?.responseSchema) {
+    const jsonPrompt = schemaToCompactPrompt(originalMetadata.responseSchema);
+    message = `${jsonPrompt}\n\n${originalMessage}`;
+  }
 
   const chatId = groupId || target;
   const agentCount = stepTotalAgents;
@@ -702,6 +715,11 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     OriginatingChannel: channel,
     OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
     Model: 'kimi-coding/k2p5',
+    Metadata: {
+      ...originalMetadata,
+      responseSchema: originalMetadata?.responseSchema,
+      expectJson: !!originalMetadata?.responseSchema,
+    },
     ...mediaPayload,
   });
 

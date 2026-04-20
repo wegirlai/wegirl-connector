@@ -602,9 +602,12 @@ const plugin = {
 
           logger.info(`[hr] action=${action} 执行完成`);
 
+          // 格式化结果为易读的文本
+          const formattedText = formatResultForReply(action, result);
+
           // 返回 OpenClaw 期望的格式
           return {
-            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+            content: [{ type: "text" as const, text: formattedText }],
             details: result
           };
         }
@@ -898,8 +901,8 @@ async function handleListAgents(redis: Redis, logger: any): Promise<any> {
         }
 
         const data = await redis.hgetall(key);
-        // 返回所有 staff（包括 agent 和 human）
-        if (data.type !== 'agent' && data.type !== 'human') return null;
+        // 返回所有 staff（包括 agent、human 和 npc）
+        if (data.type !== 'agent' && data.type !== 'human' && data.type !== 'npc') return null;
 
         // 解析性格和能力
         let personalityVibe = '-';
@@ -940,6 +943,10 @@ async function handleListAgents(redis: Redis, logger: any): Promise<any> {
   );
 
   const validAgents = agents.filter(a => a !== null);
+  
+  // Debug: 检查 sitemap 是否在 validAgents 中
+  const sitemapAgent = validAgents.find((a: any) => a?.accountId === 'sitemap');
+  console.log(`[HR DEBUG] Sitemap in validAgents: ${sitemapAgent ? 'YES' : 'NO'}, total: ${validAgents.length}`);
   
   // 按 instanceId 排序
   validAgents.sort((a: any, b: any) => {
@@ -1784,9 +1791,10 @@ function formatResultForReply(action: string, result: any): string {
         return '📋 团队花名册\n\n暂无成员';
       }
 
-      // 分离 Agents 和 Humans
+      // 分离 Agents、Humans 和 NPCs
       const agentList = agents.filter((s: any) => s.type === 'agent');
       const humanList = agents.filter((s: any) => s.type === 'human');
+      const npcList = agents.filter((s: any) => s.type === 'npc');
 
       const lines = ['📋 团队花名册', ''];
       
@@ -1832,7 +1840,28 @@ function formatResultForReply(action: string, result: any): string {
         });
       }
 
-      lines.push(`共 ${agents.length} 位成员（🤖 ${agentList.length} / 👤 ${humanList.length}）`);
+      // 🎭 NPCs
+      if (npcList.length > 0) {
+        // 按 instanceId 分组
+        const npcGroups: Record<string, any[]> = {};
+        npcList.forEach((n: any) => {
+          const instanceId = n.instanceId || 'unknown';
+          if (!npcGroups[instanceId]) npcGroups[instanceId] = [];
+          npcGroups[instanceId].push(n);
+        });
+        
+        Object.keys(npcGroups).sort().forEach(instanceId => {
+          lines.push(`${instanceId} 实例：`);
+          npcGroups[instanceId].forEach((n: any) => {
+            const status = n.status === 'online' ? '🟢' : '⚪';
+            const role = n.role && n.role !== '-' ? ` - ${n.role}` : '';
+            lines.push(`🎭 ${n.name || n.accountId}${role} ${status}`);
+          });
+          lines.push('');
+        });
+      }
+
+      lines.push(`共 ${agents.length} 位成员（🤖 ${agentList.length} / 👤 ${humanList.length} / 🎭 ${npcList.length}）`);
       return lines.join('\n');
     }
 
