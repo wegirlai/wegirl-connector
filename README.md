@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.7 (2026-04-20) ⭐ Current
+### v1.0.8 (2026-04-22) ⭐ Current
+
+**文档整理与版本同步**:
+- ✅ 同步 `package.json` 版本号：`1.0.3` → `1.0.8`
+- ✅ 清理 README.md 里程碑历史中的重复段落
+- ✅ 确保里程碑文档与代码版本一致
+
+详见 [MILESTONE-v1.0.8.md](./milestones/MILESTONE-v1.0.8.md)
+
+### v1.0.7 (2026-04-20)
 
 **JSON Schema 响应支持 + NPC 类型 + HR 结果美化**:
 - ✅ 新增 `responseSchema` 元数据，自动注入 `[JSON_MODE]` 提示
@@ -201,13 +210,6 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ 统一消息构建函数 `buildMessage`
 
 详见 [MILESTONE-v2.1.0.md](./milestones/MILESTONE-v2.1.0.md)
-- ✅ 支持 `replyTo` 自动转发（同步/异步模式）
-- ✅ 支持多个 `replyTo` 目标（数组）
-- ✅ 转发失败自动通知调用方
-- ✅ 新增 `forwarding`/`forwarded` 返回状态
-- ✅ 统一消息构建函数 `buildMessage`
-
-详见 [MILESTONE-v2.1.0.md](./milestones/MILESTONE-v2.1.0.md)
 
 ---
 
@@ -236,18 +238,6 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 - ✅ H2A/A2A/A2H 消息流支持
 
 详见 [MILESTONE-v2.0.md](./milestones/MILESTONE-v2.0.md)
-
----
-
-**与 wegirl-service 集成**:
-- ✅ 职责分离：wegirl-connector 只发送，`wegirl-service` 处理业务逻辑
-- ✅ `hr_manage` 参数与 `SessionsSendOptions` 对齐（`source`/`target`/`chatType` 等）
-- ✅ 移除 HR agent 回复拦截
-- ✅ 移除 `RepliesSubscriber`（移至 wegirl-service）
-
-**协议对齐**:
-- ✅ 统一使用 `source`/`target` 替代 `userId`
-- ✅ 新增 `senderName`/`senderOpenId`/`groupId`/`routingId` 参数
 
 ---
 
