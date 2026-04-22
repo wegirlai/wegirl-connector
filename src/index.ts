@@ -1,5 +1,8 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
@@ -13,6 +16,18 @@ import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConf
 import type {
   PluginContext
 } from './types.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageJsonPath = join(__dirname, '..', 'package.json');
+let PLUGIN_VERSION = 'unknown';
+try {
+  if (existsSync(packageJsonPath)) {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    PLUGIN_VERSION = pkg.version || 'unknown';
+  }
+} catch {
+  // ignore
+}
 
 let accountsCache: Map<string, any> = new Map();
 
@@ -245,6 +260,7 @@ const plugin = {
                     instanceId: INSTANCE_ID,
                     agentsRegistered: localAgents.length,
                     redisStatus: redisClient.status,
+                    version: PLUGIN_VERSION,
                     timestamp: new Date().toISOString()
                   }),
                   sessionId: 'global',

@@ -1,5 +1,8 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
 import { Registry } from './registry.js';
@@ -10,6 +13,18 @@ import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
 import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig } from './config.js';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageJsonPath = join(__dirname, '..', 'package.json');
+let PLUGIN_VERSION = 'unknown';
+try {
+    if (existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+        PLUGIN_VERSION = pkg.version || 'unknown';
+    }
+}
+catch {
+    // ignore
+}
 let accountsCache = new Map();
 /**
  * 从 Redis 加载所有 agents 和 humans 到 accounts
@@ -208,6 +223,7 @@ const plugin = {
                                         instanceId: INSTANCE_ID,
                                         agentsRegistered: localAgents.length,
                                         redisStatus: redisClient.status,
+                                        version: PLUGIN_VERSION,
                                         timestamp: new Date().toISOString()
                                     }),
                                     sessionId: 'global',
