@@ -2,7 +2,7 @@
 // 本地投递统一调用 V1 (sessions-send.ts)
 import Redis from 'ioredis';
 import { getWeGirlPluginConfig, getRedisConfig } from '../config.js';
-import { validateOptions, createSessionContext, isNoReply, buildMessage } from './utils.js';
+import { validateOptions, createSessionContext, buildMessage } from './utils.js';
 const KEY_PREFIX = 'wegirl:';
 // 统一使用 wegirl:stream:${instanceId}:${target} 格式
 const getStreamKey = (instanceId, target) => `${KEY_PREFIX}stream:${instanceId}:${target}`;
@@ -281,10 +281,6 @@ export async function wegirlSend(options, logger) {
         ); */
         // 5. A2H：直接发布到 replies
         if (targetInfo.type === 'human') {
-            if (isNoReply(ctx.replyTo)) {
-                logger?.debug?.(`[WeGirlSend] A2H with NO_REPLY, skipping`);
-                return { success: true, routingId, local: true };
-            }
             // A2H 消息保持原始 target（如 "tiger"）
             // wegirl-service 会通过 target 查找 feishu_userid 并发送消息
             const replyMessage = buildMessage({

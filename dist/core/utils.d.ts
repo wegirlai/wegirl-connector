@@ -28,7 +28,7 @@ export declare function createSessionKey(target: StaffId, chatType: ChatType, gr
  */
 export declare function inferEntityType(flowType: FlowType, role: 'source' | 'target'): 'agent' | 'human';
 /**
- * 检查是否为 NO_REPLY
+ * 检查是否为 NO_REPLY（已废弃：所有消息都需要回复）
  */
 export declare function isNoReply(replyTo: StaffId[]): boolean;
 /**

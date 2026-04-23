@@ -17,10 +17,11 @@ export type ChatType = 'direct' | 'group';
 export type StaffId = string;
 
 /**
- * 特殊 StaffId
+ * 特殊 StaffId（已废弃）
+ * 2026-04-23: 不再支持 system:no_reply，所有消息都需要回复
  */
 export const SPECIAL_STAFF = {
-  NO_REPLY: 'system:no_reply' as StaffId,
+  // NO_REPLY 已移除
 } as const;
 
 /**

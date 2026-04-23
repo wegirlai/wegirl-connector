@@ -199,7 +199,7 @@ async function handleAgentReply(params) {
                             source: target,
                             target: replyToTarget,
                             message: '', // 媒体消息可以不带文本
-                            replyTo: 'system:no_reply', // 转发消息不需要再回复
+                            replyTo: replyToTarget, // 转发消息需要回复
                             routingId: `${routingId}-fwd-media-${replyToTarget}`,
                             chatType: 'direct',
                             timeoutSeconds: 0,
@@ -218,7 +218,7 @@ async function handleAgentReply(params) {
                         source: target,
                         target: replyToTarget,
                         message: text,
-                        replyTo: 'system:no_reply', // 转发消息不需要再回复
+                        replyTo: replyToTarget, // 转发消息需要回复
                         routingId: `${routingId}-fwd-${replyToTarget}`,
                         chatType: 'direct',
                         timeoutSeconds: 0
@@ -243,7 +243,7 @@ async function handleAgentReply(params) {
                     source: target,
                     target: source,
                     message: `❌ 转发给 [${failedNames}] 失败`,
-                    replyTo: 'system:no_reply',
+                    replyTo: source,
                     routingId: `${routingId}-err`,
                     chatType: 'direct',
                     timeoutSeconds: 0
@@ -268,8 +268,8 @@ async function handleAgentReply(params) {
             }
             // 分析回复内容确定状态
             let replyStatus;
-            if (text.startsWith('NO_REPLY') || (text.trim() === '' && mediaUrls.length === 0)) {
-                replyStatus = 'no_reply';
+            if (text.trim() === '' && mediaUrls.length === 0) {
+                replyStatus = 'empty';
             }
             else if (text.startsWith('ERROR:') || text.includes('失败') || text.includes('错误')) {
                 replyStatus = 'error';

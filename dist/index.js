@@ -316,7 +316,7 @@ const plugin = {
                                 { type: 'string' },
                                 { type: 'array', items: { type: 'string' } }
                             ],
-                            description: '回复目标 StaffId（必填）。指定谁应该收到回复。单聊时通常是原始发送者，群聊时可以是多个目标。使用 "system:no_reply" 表示不回复'
+                            description: '回复目标 StaffId（必填）。指定谁应该收到回复。单聊时通常是原始发送者，群聊时可以是多个目标。'
                         },
                         taskId: {
                             type: 'string',

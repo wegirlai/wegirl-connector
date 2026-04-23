@@ -12,11 +12,10 @@ export type ChatType = 'direct' | 'group';
  */
 export type StaffId = string;
 /**
- * 特殊 StaffId
+ * 特殊 StaffId（已废弃）
+ * 2026-04-23: 不再支持 system:no_reply，所有消息都需要回复
  */
-export declare const SPECIAL_STAFF: {
-    readonly NO_REPLY: StaffId;
-};
+export declare const SPECIAL_STAFF: {};
 /**
  * wegirlSend 选项
  */

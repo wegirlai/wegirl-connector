@@ -13,7 +13,6 @@ import type {
 import {
   validateOptions,
   createSessionContext,
-  isNoReply,
   generateId,
   buildMessage,
   type MessageBuilderOptions
@@ -375,11 +374,6 @@ export async function wegirlSend(
 
     // 5. A2H：直接发布到 replies
     if (targetInfo.type === 'human') {
-      if (isNoReply(ctx.replyTo)) {
-        logger?.debug?.(`[WeGirlSend] A2H with NO_REPLY, skipping`);
-        return { success: true, routingId, local: true };
-      }
-
       // A2H 消息保持原始 target（如 "tiger"）
       // wegirl-service 会通过 target 查找 feishu_userid 并发送消息
       const replyMessage = buildMessage({

@@ -175,10 +175,11 @@ export function inferEntityType(
 }
 
 /**
- * 检查是否为 NO_REPLY
+ * 检查是否为 NO_REPLY（已废弃：所有消息都需要回复）
  */
 export function isNoReply(replyTo: StaffId[]): boolean {
-  return replyTo.length === 1 && replyTo[0] === 'system:no_reply';
+  // 2026-04-23: 不再支持 system:no_reply，所有消息都需要回复
+  return false;
 }
 
 /**
