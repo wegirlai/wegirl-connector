@@ -347,12 +347,7 @@ async function handleAgentReply(params) {
         log?.debug?.(`[handleAgentReply] effectiveChannel=${effectiveChannel} !== 'wegirl', skip outbound delivery (Gateway will handle)`);
         return;
     }
-    // 根据 flowType 选择正确的 Redis 频道
-    // A2A → messages 频道（agent 间通信）
-    // A2H → replies 频道（agent 回复 human）
-    const reversedFlowType = reverseFlowType(flowType);
-    const targetChannel = reversedFlowType === 'A2A' ? 'wegirl:messages' : 'wegirl:replies';
-    log?.info?.(`[handleAgentReply] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}..., flowType=${reversedFlowType}, targetChannel=${targetChannel}`);
+    log?.info?.(`[handleAgentReply] channel='wegirl', sending reply via outbound: ${text.substring(0, 50)}...`);
     try {
         const pub = await getRedisPublisher(cfg);
         if (!pub) {
@@ -363,7 +358,7 @@ async function handleAgentReply(params) {
         if (mediaUrls.length > 0) {
             for (const mediaUrl of mediaUrls) {
                 const mediaMessage = buildMessage({
-                    flowType: reversedFlowType,
+                    flowType: reverseFlowType(flowType),
                     source: target,
                     target: source,
                     message: '',
@@ -380,13 +375,13 @@ async function handleAgentReply(params) {
                         mediaType: inferMediaType(mediaUrl),
                     }
                 });
-                await pub.publish(targetChannel, JSON.stringify(mediaMessage));
+                await pub.publish('wegirl:replies', JSON.stringify(mediaMessage));
             }
         }
         // 发送文本回复
         if (text.trim()) {
             const replyMessage = buildMessage({
-                flowType: reversedFlowType,
+                flowType: reverseFlowType(flowType),
                 source: target,
                 target: source,
                 message: text,
@@ -408,7 +403,7 @@ async function handleAgentReply(params) {
                 return;
             }
             console.log(`[handleAgentReply]`, JSON.stringify(replyMessage, null, 2));
-            await pub.publish(targetChannel, JSON.stringify(replyMessage));
+            await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
             // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
             if (originalMetadata?.from === 'world') {
                 try {
@@ -420,7 +415,7 @@ async function handleAgentReply(params) {
                 }
             }
         }
-        log?.info?.(`[handleAgentReply] Reply published to ${targetChannel}, flowType=${reversedFlowType}, timeoutSeconds=${timeoutSeconds}`);
+        log?.info?.(`[handleAgentReply] Reply published to wegirl:replies, flowType=${reverseFlowType(flowType)}, timeoutSeconds=${timeoutSeconds}`);
     }
     catch (err) {
         // 发送失败，发布错误回复
@@ -445,7 +440,7 @@ async function handleAgentReply(params) {
                         errorCode: 'REPLY_PUBLISH_FAILED',
                     }
                 });
-                await pub.publish(targetChannel, JSON.stringify(errorReply));
+                await pub.publish('wegirl:replies', JSON.stringify(errorReply));
             }
         }
         catch { }
