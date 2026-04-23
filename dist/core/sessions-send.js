@@ -180,7 +180,7 @@ async function handleAgentReply(params) {
     // 优先使用显式传递的 replyTo，其次从 originalMetadata 获取
     const originalReplyTo = explicitReplyTo || originalMetadata?.replyTo;
     const replyToList = Array.isArray(originalReplyTo) ? originalReplyTo : (originalReplyTo ? [originalReplyTo] : []);
-    const validReplyToList = replyToList.filter(r => r && r !== source);
+    const validReplyToList = replyToList.filter(r => r && r !== source && r !== target);
     if (validReplyToList.length > 0) {
         log?.info?.(`[handleAgentReply] Detected ${validReplyToList.length} replyTo targets: ${validReplyToList.join(', ')}`);
         const forwardResults = [];
@@ -469,7 +469,7 @@ async function processMessage(options) {
     const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     const messageId = originalMetadata?.messageId || `wegirl-${Date.now()}`;
     const createdAt = Date.now();
-    log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}`);
+    log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}${replyTo ? `, replyTo=${replyTo}` : ''}`);
     // ========== 1. 获取 PluginRuntime ==========
     const runtime = getWeGirlRuntime();
     if (!runtime?.channel?.routing || !runtime?.channel?.reply) {
@@ -541,7 +541,9 @@ async function processMessage(options) {
     // 构建包含 routingId 和 replyTo 的消息
     // 这样 Agent 能看到 replyTo 并在调用工具时使用
     const effectiveReplyTo = (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo;
-    let messageWithRouting = `[ROUTING_ID:${routingId}]${effectiveReplyTo ? `\n[REPLY_TO:${effectiveReplyTo}]` : ''}\n${message}`;
+    // 如果 effectiveReplyTo 和 target 相同，不需要再注入 REPLY_TO（避免冗余）
+    const shouldInjectReplyTo = effectiveReplyTo && effectiveReplyTo !== target;
+    let messageWithRouting = `[ROUTING_ID:${routingId}]${shouldInjectReplyTo ? `\n[REPLY_TO:${effectiveReplyTo}]` : ''}\n${message}`;
     // 添加媒体文件信息到消息中
     const mediaFiles = originalMetadata?.mediaFiles;
     if (mediaFiles && Array.isArray(mediaFiles) && mediaFiles.length > 0) {
@@ -645,6 +647,7 @@ async function processMessage(options) {
             },
             replyOptions: {
                 onModelSelected,
+                reasoningLevel: 'on',
             },
         });
         log?.info?.(`${logPrefix} Dispatch complete`);
