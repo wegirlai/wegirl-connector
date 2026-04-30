@@ -12,7 +12,7 @@ import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, loadOpenClawConfig } from './config.js';
+import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, loadOpenClawConfig, getRagApiConfig } from './config.js';
 import type {
   PluginContext
 } from './types.js';
@@ -239,10 +239,10 @@ const plugin = {
               // 一次性注册所有本地 agent（不启动定时心跳）
               const localAgents = await getLocalAgents(logger);
               for (const agent of localAgents) {
-                if (agent?.id) {
+                if (agent?.accountId) {
                   await registry!.register({
-                    staffId: agent.id,
-                    name: agent.name || agent.id,
+                    staffId: agent.accountId,
+                    name: agent.name || agent.accountId,
                     type: 'agent',
                     instanceId: INSTANCE_ID
                   });
@@ -629,7 +629,88 @@ const plugin = {
         }
       } as any);
 
-      logger.info('[WeGirl register] Tools registered: wegirl_send, hr_manage');
+      // Search Knowledge Tool - RAG 知识检索
+      context.registerTool({
+        name: 'rag',
+        description: 'RAG 知识检索：从 sitemap_api 向量数据库搜索知识库内容，支持行业/域名过滤。适用于制造业、CNC、丝绸等领域知识问答。',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: '搜索关键词/用户问题'
+            },
+            industry: {
+              type: 'string',
+              description: '行业过滤（如 cnc, jewelry, silk）'
+            },
+            domain: {
+              type: 'string',
+              description: '域名过滤（如 rapiddirect.com）'
+            },
+            top_k: {
+              type: 'number',
+              description: '返回结果数（默认 5，最大 20）',
+              default: 5
+            }
+          },
+          required: ['query']
+        },
+        execute: async (_toolCallId: string, params: any) => {
+          const { query, industry, domain, top_k = 5 } = params;
+          const { url: ragApiUrl } = getRagApiConfig();
+
+          logger.info(`[rag] query=${query}, industry=${industry || '-'}, domain=${domain || '-'}, top_k=${top_k}`);
+
+          try {
+            const res = await fetch(`${ragApiUrl}/api/knowledge/search`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ query, industry, domain, top_k })
+            });
+
+            if (!res.ok) {
+              throw new Error(`RAG API error: ${res.status} ${res.statusText}`);
+            }
+
+            const data: any = await res.json();
+
+            if (data.code !== 200 || !data.data?.results?.length) {
+              return {
+                content: [{ type: "text" as const, text: '未找到相关知识库内容。' }],
+                details: { query, results: [], total: 0 }
+              };
+            }
+
+            const results = data.data.results;
+            const lines = ['📚 知识检索结果', ''];
+            lines.push(`查询: ${query}`);
+            lines.push(`共找到 ${results.length} 条结果：\n`);
+
+            results.forEach((r: any, i: number) => {
+              lines.push(`[${i + 1}] ${r.title || 'Untitled'}`);
+              lines.push(`来源: ${r.domain || 'unknown'}`);
+              lines.push(`相关度: ${(r.score * 100).toFixed(1)}%`);
+              lines.push(r.content?.slice(0, 300) || '(无内容)');
+              lines.push(`URL: ${r.url || '-'}`);
+              lines.push('');
+            });
+
+            return {
+              content: [{ type: "text" as const, text: lines.join('\n') }],
+              details: { query, results, total: results.length }
+            };
+          } catch (err: any) {
+            logger.error(`[rag] Failed: ${err.message}`);
+            return {
+              content: [{ type: "text" as const, text: `知识检索失败: ${err.message}` }],
+              details: { success: false, error: err.message }
+            };
+          }
+        }
+      } as any);
+
+      logger.info('[WeGirl register] Tools registered: wegirl_send, hr, rag');
     } else {
       logger.warn('[WeGirl register] registerTool not available');
     }
@@ -1242,8 +1323,8 @@ interface SyncResult {
   registered?: number;
 }
 
-// 获取本地所有 agents（从配置文件读取）
-async function getLocalAgents(logger: any): Promise<Array<{ name: string; id: string }>> {
+// 获取本地所有 wegirl agents（从 openclaw.json 的 bindings 读取 accountId）
+async function getLocalAgents(logger: any): Promise<Array<{ name: string; accountId: string; agentId: string }>> {
   try {
     const configPath = getOpenClawConfigPath();
     logger.info(`[sync] Reading config from: ${configPath}`);
@@ -1254,16 +1335,34 @@ async function getLocalAgents(logger: any): Promise<Array<{ name: string; id: st
     }
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    // openclaw.json 中 agents 在 .agents.list 数组中
-    const agents = config.agents?.list || [];
-    logger.info(`[sync] Found ${agents.length} agents in config`);
 
-    return agents
-      .filter((a: any) => a != null)  // 过滤掉 null/undefined
-      .map((a: any) => ({
-        name: a.name || a.id,
-        id: a.id
-      }));
+    // 从 bindings 中提取 wegirl channel 的 agent 列表
+    const bindings = config.bindings || [];
+    const wegirlBindings = bindings.filter(
+      (b: any) => b.match?.channel === 'wegirl' && b.match?.accountId
+    );
+
+    // 从 agents.list 中获取 name 映射
+    const agents = config.agents?.list || [];
+    const agentMap = new Map<string, string>();
+    for (const a of agents) {
+      if (a?.id) {
+        agentMap.set(a.id, a.name || a.id);
+      }
+    }
+
+    const localAgents = wegirlBindings.map((b: any) => ({
+      agentId: b.agentId,
+      accountId: b.match.accountId,
+      name: agentMap.get(b.agentId) || b.agentId,
+    }));
+
+    logger.info(`[sync] Found ${localAgents.length} wegirl agents in config (from bindings)`);
+    for (const a of localAgents) {
+      logger.info(`[sync]   agentId=${a.agentId}, accountId=${a.accountId}, name=${a.name}`);
+    }
+
+    return localAgents;
   } catch (err: any) {
     logger.error(`[sync] Failed to read local agents: ${err.message}`);
     return [];
@@ -1330,16 +1429,15 @@ async function syncAgentsFromLocal(
 
   const toKeep: string[] = [];
   const toRemove: string[] = [];
-  const toRegister: Array<{ name: string; id: string }> = [];
+  const toRegister: Array<{ name: string; accountId: string; agentId: string }> = [];
 
   // 检查 Redis 中的 agents：保留存在的，清理僵尸
   for (const accountId of redisAgentIds) {
     const staffData = await redis.hgetall(`${KEY_PREFIX}staff:${accountId}`);
-    const agentName = staffData.name?.replace(' Notifier', '').toLowerCase();
 
-    // 检查本地是否存在
+    // 检查本地是否存在该 accountId（通过 bindings 中的 accountId 匹配）
     const existsLocally = localAgents?.some(
-      a => a?.name?.toLowerCase() === agentName || a?.id === accountId
+      a => a?.accountId === accountId
     ) || false;
 
     if (existsLocally) {
@@ -1357,24 +1455,24 @@ async function syncAgentsFromLocal(
 
   // 检查本地 agents：注册 Redis 中不存在的
   for (const localAgent of (localAgents || [])) {
-    if (!localAgent?.name) continue;
-    const accountId = `${localAgent.name}`;
-    if (!redisAgentIds.includes(accountId)) {
+    if (!localAgent?.accountId) continue;
+    if (!redisAgentIds.includes(localAgent.accountId)) {
       toRegister.push(localAgent);
     }
   }
 
-  // 3. 注册新 agents (使用统一的 staff key)
+  // 3. 注册新 agents (使用 accountId 作为 staff key)
   for (const agent of toRegister) {
-    const accountId = `${agent.name}`;
-    const agentCapabilities = [agent.name, 'wegirl_send'];
+    const accountId = agent.accountId;
+    const agentName = agent.name;
+    const agentCapabilities = [agentName, 'wegirl_send'];
 
     await redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
       staffId: accountId,
       type: 'agent',
       instanceId: instanceId,
       role: '-',
-      name: agent.name,
+      name: agentName,
       capabilities: agentCapabilities.join(','),
       status: 'online',
       lastHeartbeat: Date.now().toString(),
@@ -1393,7 +1491,7 @@ async function syncAgentsFromLocal(
     // 添加到实例集合 (使用新的 staff 集合)
     await redis.sadd(`${KEY_PREFIX}instance:${instanceId}:staff`, accountId);
 
-    logger.info(`[sync] Registered agent: ${accountId}`);
+    logger.info(`[sync] Registered agent: accountId=${accountId}, agentId=${agent.agentId}, name=${agentName}`);
   }
 
   // 4. 清理僵尸 agents

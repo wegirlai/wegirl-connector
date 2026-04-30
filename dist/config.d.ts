@@ -26,6 +26,13 @@ export declare function getRedisConfig(): {
     db: number;
 };
 /**
+ * 获取 RAG API 配置
+ */
+export declare function getRagApiConfig(): {
+    url: string;
+    timeout: number;
+};
+/**
  * 获取实例 ID
  */
 export declare function getInstanceId(): string;

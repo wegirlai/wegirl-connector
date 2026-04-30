@@ -71,6 +71,16 @@ export function getRedisConfig() {
     };
 }
 /**
+ * 获取 RAG API 配置
+ */
+export function getRagApiConfig() {
+    const pluginCfg = getWeGirlPluginConfig();
+    return {
+        url: pluginCfg?.ragApiUrl || 'http://localhost:4001',
+        timeout: pluginCfg?.ragApiTimeout || 10000,
+    };
+}
+/**
  * 获取实例 ID
  */
 export function getInstanceId() {

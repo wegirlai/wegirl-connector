@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.8 (2026-04-22) ⭐ Current
+### v1.0.9 (2026-04-30) ⭐ Current
+
+**RAG 工具修复**:
+- ✅ 修复 `rag` 工具误判空结果的问题：API 返回 `code: 200` 而非 `success: true`
+- ✅ 将判断条件改为 `data.code !== 200 || !data.data?.results?.length`
+- ✅ 影响文件: `src/index.ts`
+
+详见 [MILESTONE-v1.0.9.md](./milestones/MILESTONE-v1.0.9.md)
+
+### v1.0.8 (2026-04-22)
 
 **文档整理与版本同步**:
 - ✅ 同步 `package.json` 版本号：`1.0.3` → `1.0.8`

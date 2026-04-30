@@ -27,6 +27,16 @@
         "description": "Redis 数据库编号",
         "default": 1
       },
+      "ragApiUrl": {
+        "type": "string",
+        "description": "RAG 知识检索 API 地址（如 http://10.8.0.61:4001）",
+        "default": "http://localhost:4001"
+      },
+      "ragApiTimeout": {
+        "type": "number",
+        "description": "RAG API 超时毫秒数",
+        "default": 10000
+      },
       "channel": {
         "type": "string",
         "description": "订阅的 Redis 频道",
