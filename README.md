@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.9 (2026-04-30) ⭐ Current
+### v1.0.10 (2025-07-02) ⭐ Current
+
+**messageId 全链路追踪 + 配置合并增强**:
+- ✅ 新增消息 ID 生成策略：`{flowType}_CNS_{instanceId}_{uuid}`（转发）/ `{flowType}_CNR_{instanceId}_{uuid}`（回复）
+- ✅ 贯穿 wegirl_send → processMessage → Agent → handleAgentReply 全链路
+- ✅ 配置合并：channel 配置优先于 plugin 配置（解决 ragApiUrl 放在 channel 段不生效的问题）
+- ✅ 向后兼容：未传入 messageId 时自动生成
+
+详见 [MILESTONE-v1.0.10.md](./milestones/MILESTONE-v1.0.10.md)
+
+### v1.0.9 (2026-04-30)
 
 **RAG 工具修复**:
 - ✅ 修复 `rag` 工具误判空结果的问题：API 返回 `code: 200` 而非 `success: true`

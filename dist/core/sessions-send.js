@@ -1,5 +1,6 @@
 // src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 import Redis from 'ioredis';
+import { getWeGirlPluginConfig } from "../config.js";
 import { getWeGirlRuntime } from "../runtime.js";
 import { buildMessage } from './utils.js';
 import { createReplyPrefixOptions, resolveOutboundMediaUrls } from "openclaw/plugin-sdk";
@@ -141,7 +142,15 @@ async function handleAgentReply(params) {
     const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log } = params;
     const text = payload.text ?? '';
     const mediaUrls = resolveOutboundMediaUrls(payload);
-    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}`);
+    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}, originalMessageId=${messageId}`);
+    // Agent 回复时生成新的 messageId
+    // 格式: {flowType}_CNR_{instanceId}_{uuid}
+    // CNR = wegirl-connector 回复
+    const generateReplyMessageId = (ft) => {
+        const instanceId = getWeGirlPluginConfig()?.instanceId || 'instance-local';
+        const uuid = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+        return `${ft}_CNR_${instanceId}_${uuid}`;
+    };
     // 获取 timeoutSeconds（从 options.metadata 或默认值）
     const timeoutSeconds = originalMetadata?.timeoutSeconds || 0;
     const responseTtl = timeoutSeconds > 0 ? timeoutSeconds + 30 : 60;
@@ -159,6 +168,7 @@ async function handleAgentReply(params) {
                     message: text,
                     chatType,
                     routingId: responseRoutingId,
+                    messageId: generateReplyMessageId(flowType),
                     msgType: 'response',
                     fromType: 'inner',
                     metadata: {
@@ -291,6 +301,7 @@ async function handleAgentReply(params) {
                         chatType: 'group',
                         groupId,
                         routingId,
+                        messageId: generateReplyMessageId(flowType),
                         msgType: 'media',
                         fromType: 'inner',
                         metadata: {
@@ -315,6 +326,7 @@ async function handleAgentReply(params) {
                     chatType: 'group',
                     groupId,
                     routingId,
+                    messageId: generateReplyMessageId(flowType),
                     msgType: 'message',
                     fromType: 'inner',
                     metadata: {
@@ -364,6 +376,7 @@ async function handleAgentReply(params) {
                     message: '',
                     chatType,
                     routingId,
+                    messageId: generateReplyMessageId(flowType),
                     msgType: 'media',
                     fromType: 'inner',
                     metadata: {
@@ -387,6 +400,7 @@ async function handleAgentReply(params) {
                 message: text,
                 chatType,
                 routingId,
+                messageId: generateReplyMessageId(flowType),
                 msgType: 'message',
                 fromType: 'inner',
                 metadata: {
@@ -429,6 +443,7 @@ async function handleAgentReply(params) {
                     message: `发送失败: ${err.message}`,
                     chatType,
                     routingId,
+                    messageId: generateReplyMessageId(flowType),
                     msgType: 'error',
                     fromType: 'inner',
                     metadata: {
@@ -467,7 +482,9 @@ async function processMessage(options) {
     const chatId = groupId || target;
     const agentCount = stepTotalAgents;
     const routingId = originalRoutingId || `routing_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-    const messageId = originalMetadata?.messageId || `wegirl-${Date.now()}`;
+    // messageId 策略：传入则保留，否则生成新的（用于 Agent 回复）
+    const incomingMessageId = options.messageId || originalMetadata?.messageId;
+    const messageId = incomingMessageId || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     const createdAt = Date.now();
     log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}${replyTo ? `, replyTo=${replyTo}` : ''}`);
     // ========== 1. 获取 PluginRuntime ==========
@@ -515,6 +532,7 @@ async function processMessage(options) {
             chatType,
             groupId: chatType === 'group' ? chatId : undefined,
             routingId,
+            messageId,
             fromType: options.fromType || 'inner',
             metadata: {
                 ...originalMetadata,

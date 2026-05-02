@@ -25,6 +25,8 @@ interface SessionsSendOptions {
     metadata?: any;
     /** 回复目标 */
     replyTo?: string;
+    /** 消息ID（可选，传入时保留，回复时生成新的） */
+    messageId?: string;
     /** 消息流向类型 */
     flowType?: string;
     /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */

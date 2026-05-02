@@ -67,6 +67,13 @@ export interface WeGirlSendOptions {
   routingId?: string;
 
   /** 
+   * 原始消息ID（可选）
+   * - 消息进入时传入（如飞书 message_id）
+   * - Agent 回复时会生成新的 messageId
+   */
+  messageId?: string;
+
+  /** 
    * 消息类型（可选，默认 'message'）
    * - 'message': 普通消息
    * - 'onboard_human': 入职命令

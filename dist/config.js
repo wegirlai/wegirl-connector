@@ -54,10 +54,20 @@ export function setGlobalConfig(cfg) {
 }
 /**
  * 获取 wegirl 插件配置
+ *
+ * 合并 plugins.entries.wegirl.config 和 channels.wegirl 的配置，
+ * channel 配置优先级更高（覆盖 plugin 配置）。
+ * 这样 ragApiUrl 等配置无论写在 plugin 还是 channel 段都能被正确读取。
  */
 export function getWeGirlPluginConfig() {
     const cfg = getGlobalConfig();
-    return cfg?.plugins?.entries?.wegirl?.config || {};
+    const pluginConfig = cfg?.plugins?.entries?.wegirl?.config || {};
+    const channelConfig = cfg?.channels?.wegirl || {};
+    // 合并：channel 配置覆盖 plugin 配置
+    return {
+        ...pluginConfig,
+        ...channelConfig,
+    };
 }
 /**
  * 获取 Redis 配置

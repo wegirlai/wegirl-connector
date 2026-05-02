@@ -142,6 +142,7 @@ export function buildMessage(opts, baseMetadata) {
         chatType: opts.chatType,
         groupId: opts.groupId,
         routingId: opts.routingId,
+        messageId: opts.messageId,
         msgType: opts.msgType || 'message',
         fromType: opts.fromType || 'inner',
         timeoutSeconds: opts.timeoutSeconds || 0,

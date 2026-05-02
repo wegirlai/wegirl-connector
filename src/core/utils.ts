@@ -194,6 +194,7 @@ export interface MessageBuilderOptions {
   groupId?: string;
   routingId: string;
   msgType?: string;
+  messageId?: string;
   fromType?: string;
   metadata?: Record<string, any>;
   timeoutSeconds?: number;
@@ -214,6 +215,7 @@ export function buildMessage(
     chatType: opts.chatType,
     groupId: opts.groupId,
     routingId: opts.routingId,
+    messageId: opts.messageId,
     msgType: opts.msgType || 'message',
     fromType: opts.fromType || 'inner',
     timeoutSeconds: opts.timeoutSeconds || 0,

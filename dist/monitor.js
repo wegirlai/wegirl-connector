@@ -102,6 +102,7 @@ export async function monitorWeGirlProvider(params) {
                             chatType: msg.chatType || 'direct',
                             groupId: msg.groupId,
                             routingId: msg.routingId,
+                            messageId: msg.messageId,
                             taskId: msg.taskId,
                             stepId: msg.stepId,
                             stepTotalAgents: msg.stepTotalAgents,

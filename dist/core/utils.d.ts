@@ -43,6 +43,7 @@ export interface MessageBuilderOptions {
     groupId?: string;
     routingId: string;
     msgType?: string;
+    messageId?: string;
     fromType?: string;
     metadata?: Record<string, any>;
     timeoutSeconds?: number;

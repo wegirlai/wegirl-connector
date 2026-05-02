@@ -210,6 +210,26 @@ async function saveSessionRoutingId(source, routingId, redis, ttl = 3600) {
     await redis.setex(sessionRoutingKey, ttl, routingId);
 }
 /**
+ * 生成请求消息ID（wegirl_send 转发时）
+ * 格式: {flowType}_CNS_{instanceId}_{uuid}
+ * CNS = wegirl_send 转发
+ */
+function generateSendMessageId(flowType) {
+    const instanceId = getCurrentInstanceId();
+    const uuid = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    return `${flowType}_CNS_${instanceId}_${uuid}`;
+}
+/**
+ * 生成回复消息ID（Agent 返回时）
+ * 格式: {flowType}_CNR_{instanceId}_{uuid}
+ * CNR = wegirl-connector 回复
+ */
+function generateReplyMessageId(flowType) {
+    const instanceId = getCurrentInstanceId();
+    const uuid = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    return `${flowType}_CNR_${instanceId}_${uuid}`;
+}
+/**
  * V2 核心发送函数
  *
  * 职责：
@@ -236,8 +256,10 @@ export async function wegirlSend(options, logger) {
     // 处理 timeoutSeconds
     const timeoutSeconds = Math.min(Math.max(0, options.timeoutSeconds || 0), 300);
     const isSyncMode = timeoutSeconds > 0;
+    // messageId 策略：传入则用传入的，否则生成新的（wegirl_send 转发场景）
+    const messageId = options.messageId || generateSendMessageId(options.flowType);
     // 添加详细日志
-    logger?.info?.(`=====>[WeGirlSend] Options: ${JSON.stringify(normalizedOptions)}, sync=${isSyncMode}, timeout=${timeoutSeconds}s`);
+    logger?.info?.(`=====>[WeGirlSend] Options: ${JSON.stringify(normalizedOptions)}, sync=${isSyncMode}, timeout=${timeoutSeconds}s, messageId=${messageId}`);
     // 同步模式：创建响应队列
     if (isSyncMode) {
         await redis.setex(`${KEY_PREFIX}await:${routingId}`, timeoutSeconds + 30, JSON.stringify({
@@ -291,6 +313,7 @@ export async function wegirlSend(options, logger) {
                 chatType: ctx.chatType,
                 groupId: ctx.groupId,
                 routingId: ctx.routingId,
+                messageId,
                 msgType: options.msgType || 'message',
                 fromType: 'inner',
                 timeoutSeconds,
@@ -316,6 +339,7 @@ export async function wegirlSend(options, logger) {
             chatType: ctx.chatType,
             groupId: ctx.groupId,
             routingId: ctx.routingId,
+            messageId,
             msgType: options.msgType || 'message',
             replyTo: ctx.replyTo,
             taskId: ctx.taskId,
