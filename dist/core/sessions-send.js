@@ -142,7 +142,9 @@ async function handleAgentReply(params) {
     const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log } = params;
     const text = payload.text ?? '';
     const mediaUrls = resolveOutboundMediaUrls(payload);
-    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}, originalMessageId=${messageId}`);
+    // 计算回复的 flowType（反向）
+    const replyFlowType = reverseFlowType(flowType);
+    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}, originalMessageId=${messageId}, replyFlowType=${replyFlowType}`);
     // Agent 回复时生成新的 messageId
     // 格式: {flowType}_CNR_{instanceId}_{uuid}
     // CNR = wegirl-connector 回复
@@ -162,13 +164,13 @@ async function handleAgentReply(params) {
             const redis = await getRedisPublisher(cfg);
             if (redis) {
                 const responseData = buildMessage({
-                    flowType: reverseFlowType(flowType),
+                    flowType: replyFlowType,
                     source: target,
                     target: source,
                     message: text,
                     chatType,
                     routingId: responseRoutingId,
-                    messageId: generateReplyMessageId(flowType),
+                    messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'response',
                     fromType: 'inner',
                     metadata: {
@@ -294,14 +296,14 @@ async function handleAgentReply(params) {
             if (mediaUrls.length > 0) {
                 for (const mediaUrl of mediaUrls) {
                     const mediaMessage = buildMessage({
-                        flowType: reverseFlowType(flowType),
+                        flowType: replyFlowType,
                         source: target,
                         target: source,
                         message: '',
                         chatType: 'group',
                         groupId,
                         routingId,
-                        messageId: generateReplyMessageId(flowType),
+                        messageId: generateReplyMessageId(replyFlowType),
                         msgType: 'media',
                         fromType: 'inner',
                         metadata: {
@@ -319,14 +321,14 @@ async function handleAgentReply(params) {
             // 发送文本消息
             if (text.trim()) {
                 const replyMessage = buildMessage({
-                    flowType: reverseFlowType(flowType),
+                    flowType: replyFlowType,
                     source: target,
                     target: source,
                     message: text,
                     chatType: 'group',
                     groupId,
                     routingId,
-                    messageId: generateReplyMessageId(flowType),
+                    messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'message',
                     fromType: 'inner',
                     metadata: {
@@ -344,7 +346,7 @@ async function handleAgentReply(params) {
                 }
                 await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
             }
-            log?.info?.(`[handleAgentReply] Group reply published to wegirl:replies from ${target}, flowType=${reverseFlowType(flowType)}, timeoutSeconds=${timeoutSeconds}`);
+            log?.info?.(`[handleAgentReply] Group reply published to wegirl:replies from ${target}, flowType=${replyFlowType}, timeoutSeconds=${timeoutSeconds}`);
             return;
         }
         catch (err) {
@@ -370,13 +372,13 @@ async function handleAgentReply(params) {
         if (mediaUrls.length > 0) {
             for (const mediaUrl of mediaUrls) {
                 const mediaMessage = buildMessage({
-                    flowType: reverseFlowType(flowType),
+                    flowType: replyFlowType,
                     source: target,
                     target: source,
                     message: '',
                     chatType,
                     routingId,
-                    messageId: generateReplyMessageId(flowType),
+                    messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'media',
                     fromType: 'inner',
                     metadata: {
@@ -394,13 +396,13 @@ async function handleAgentReply(params) {
         // 发送文本回复
         if (text.trim()) {
             const replyMessage = buildMessage({
-                flowType: reverseFlowType(flowType),
+                flowType: replyFlowType,
                 source: target,
                 target: source,
                 message: text,
                 chatType,
                 routingId,
-                messageId: generateReplyMessageId(flowType),
+                messageId: generateReplyMessageId(replyFlowType),
                 msgType: 'message',
                 fromType: 'inner',
                 metadata: {
@@ -429,7 +431,7 @@ async function handleAgentReply(params) {
                 }
             }
         }
-        log?.info?.(`[handleAgentReply] Reply published to wegirl:replies, flowType=${reverseFlowType(flowType)}, timeoutSeconds=${timeoutSeconds}`);
+        log?.info?.(`[handleAgentReply] Reply published to wegirl:replies, flowType=${replyFlowType}, timeoutSeconds=${timeoutSeconds}`);
     }
     catch (err) {
         // 发送失败，发布错误回复
@@ -443,7 +445,7 @@ async function handleAgentReply(params) {
                     message: `发送失败: ${err.message}`,
                     chatType,
                     routingId,
-                    messageId: generateReplyMessageId(flowType),
+                    messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'error',
                     fromType: 'inner',
                     metadata: {

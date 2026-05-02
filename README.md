@@ -24,9 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.10 (2025-07-02) ⭐ Current
+### v1.0.11 (2025-07-02) ⭐ Current
 
-**messageId 全链路追踪 + 配置合并增强**:
+**messageId flowType 反向修正**:
+- ✅ 修复 v1.0.10 中 Agent 回复 messageId 使用了原始 flowType 的问题
+- ✅ 回复 messageId 现在正确使用 `reverseFlowType(flowType)`（如 H2A → A2H）
+- ✅ 所有回复路径统一修正：同步响应、群聊、单聊、错误消息
+
+详见 [MILESTONE-v1.0.11.md](./milestones/MILESTONE-v1.0.11.md)
+
+### v1.0.10 (2025-07-02)
 - ✅ 新增消息 ID 生成策略：`{flowType}_CNS_{instanceId}_{uuid}`（转发）/ `{flowType}_CNR_{instanceId}_{uuid}`（回复）
 - ✅ 贯穿 wegirl_send → processMessage → Agent → handleAgentReply 全链路
 - ✅ 配置合并：channel 配置优先于 plugin 配置（解决 ragApiUrl 放在 channel 段不生效的问题）
