@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.0.11 (2025-07-02) ⭐ Current
+### v1.1.0 (2026-05-03) ⭐ Current
+
+**移除硬编码模型配置**:
+- ✅ 删除 `sessions-send.ts` 中硬编码的 `Model: 'kimi-coding/k2p5'`
+- ✅ 消息处理遵循 OpenClaw 实例默认模型配置，不再强制覆盖
+- ✅ 提升多实例灵活性，支持不同实例使用不同模型
+
+详见 [MILESTONE-v1.1.0.md](./milestones/MILESTONE-v1.1.0.md)
+
+### v1.0.11 (2025-07-02)
 
 **messageId flowType 反向修正**:
 - ✅ 修复 v1.0.10 中 Agent 回复 messageId 使用了原始 flowType 的问题

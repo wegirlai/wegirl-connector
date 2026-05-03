@@ -740,7 +740,6 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     CommandAuthorized: true,
     OriginatingChannel: channel,
     OriginatingTo: (Array.isArray(replyTo) ? replyTo[0] : replyTo) || originalMetadata?.originatingTo || source,
-    Model: 'kimi-coding/k2p5',
     Metadata: {
       ...originalMetadata,
       responseSchema: originalMetadata?.responseSchema,

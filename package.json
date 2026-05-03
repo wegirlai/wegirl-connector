@@ -1,6 +1,6 @@
 {
   "name": "wegirl",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "WeGirl Redis connector for OpenClaw",
   "type": "module",
   "main": "dist/index.js",
