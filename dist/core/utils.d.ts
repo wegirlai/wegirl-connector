@@ -47,6 +47,7 @@ export interface MessageBuilderOptions {
     fromType?: string;
     metadata?: Record<string, any>;
     timeoutSeconds?: number;
+    replyContentType?: string;
 }
 /**
  * 构建标准消息

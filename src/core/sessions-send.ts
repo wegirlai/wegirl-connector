@@ -65,6 +65,8 @@ interface SessionsSendOptions {
   flowType?: string;
   /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
   fromType?: 'inner' | 'outer';
+  /** 回复内容类型，默认 text */
+  replyContentType?: 'md' | 'json' | 'text';
 
   // V1 内部字段
   cfg: any;
@@ -218,12 +220,13 @@ async function handleAgentReply(params: {
   taskId?: string;
   stepId?: string;
   agentCount?: number;
+  replyContentType?: 'md' | 'json' | 'text';
   log?: any;
 }): Promise<void> {
   const {
     payload, flowType, source, target, chatType, groupId, chatId,
     routingId, originalRoutingId, messageId, createdAt,
-    originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log
+    originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, replyContentType, log
   } = params;
 
   const text = payload.text ?? '';
@@ -264,6 +267,7 @@ async function handleAgentReply(params: {
           messageId: generateReplyMessageId(replyFlowType),
           msgType: 'response',
           fromType: 'inner',
+          replyContentType,
           metadata: {
             originalRoutingId,
             mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
@@ -406,6 +410,7 @@ async function handleAgentReply(params: {
             messageId: generateReplyMessageId(replyFlowType),
             msgType: 'media',
             fromType: 'inner',
+            replyContentType,
             metadata: {
               replyStatus,
               taskId,
@@ -432,6 +437,7 @@ async function handleAgentReply(params: {
           messageId: generateReplyMessageId(replyFlowType),
           msgType: 'message',
           fromType: 'inner',
+          replyContentType,
           metadata: {
             replyStatus,
             taskId,
@@ -487,6 +493,7 @@ async function handleAgentReply(params: {
           messageId: generateReplyMessageId(replyFlowType),
           msgType: 'media',
           fromType: 'inner',
+          replyContentType,
           metadata: {
             inReplyTo: messageId,
             status: 'completed',
@@ -512,6 +519,7 @@ async function handleAgentReply(params: {
         messageId: generateReplyMessageId(replyFlowType),
         msgType: 'message',
         fromType: 'inner',
+        replyContentType,
         metadata: {
           inReplyTo: messageId,
           status: 'completed',
@@ -533,15 +541,8 @@ async function handleAgentReply(params: {
       // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
       if (originalMetadata?.from === 'world') {
         try {
-          // 为 world stream 添加 expectJson 标记到 metadata
-          const worldMessage = {
-            ...replyMessage,
-            metadata: {
-              ...replyMessage.metadata,
-              expectJson: !!originalMetadata?.responseSchema,
-            }
-          };
-          await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(worldMessage));
+          // replyMessage 已有 replyContentType，直接发送
+          await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(replyMessage));
           log?.info?.(`[handleAgentReply] from=world message also sent to wegirl:stream:world from ${target}`);
         } catch (streamErr: any) {
           log?.error?.(`[handleAgentReply] Failed to send to world stream: ${streamErr.message}`);
@@ -565,6 +566,7 @@ async function handleAgentReply(params: {
           messageId: generateReplyMessageId(replyFlowType),
           msgType: 'error',
           fromType: 'inner',
+          replyContentType,
           metadata: {
             inReplyTo: messageId,
             status: 'failed',
@@ -598,11 +600,14 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     taskId, stepTotalAgents, stepId, routingId: originalRoutingId,
     msgType, metadata: originalMetadata, replyTo
   } = options;
+  // wegirl:forward 消息 replyContentType 固定为 text
+  const replyContentType = options.replyContentType || 'text';
 
-  // 处理 message，如果有 responseSchema 则注入 JSON_MODE prompt
+  // 处理 message，如果是 json 模式，则注入 JSON_MODE prompt
   let message = originalMessage;
-  if (originalMetadata?.responseSchema) {
-    const jsonPrompt = schemaToCompactPrompt(originalMetadata.responseSchema);
+  if (replyContentType === 'json') {
+    const schema = originalMetadata?.responseSchema || {message: ""};
+    const jsonPrompt = schemaToCompactPrompt(schema);
     message = `${jsonPrompt}\n\n${originalMessage}`;
   }
 
@@ -669,6 +674,7 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
       routingId,
       messageId,
       fromType: options.fromType || 'inner',
+      replyContentType,
       metadata: {
         ...originalMetadata,
         matchedBy: route.matchedBy,
@@ -751,7 +757,7 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     Metadata: {
       ...originalMetadata,
       responseSchema: originalMetadata?.responseSchema,
-      expectJson: !!originalMetadata?.responseSchema,
+      expectJson: replyContentType === 'json',
     },
     ...mediaPayload,
   });
@@ -789,6 +795,7 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
             createdAt,
             originalMetadata,
             replyTo,  // 显式传递 replyTo
+            replyContentType,
             cfg,
             channel,
             taskId,

@@ -134,7 +134,7 @@ export function isNoReply(replyTo) {
  * 构建标准消息
  */
 export function buildMessage(opts, baseMetadata) {
-    return {
+    const result = {
         flowType: opts.flowType,
         source: opts.source,
         target: opts.target,
@@ -153,5 +153,9 @@ export function buildMessage(opts, baseMetadata) {
             processedAt: Date.now(),
         }
     };
+    if (opts.replyContentType !== undefined) {
+        result.replyContentType = opts.replyContentType;
+    }
+    return result;
 }
 //# sourceMappingURL=utils.js.map

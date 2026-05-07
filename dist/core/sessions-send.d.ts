@@ -31,6 +31,8 @@ interface SessionsSendOptions {
     flowType?: string;
     /** 来源类型: inner (wegirlSend调用) / outer (startAccount调用) */
     fromType?: 'inner' | 'outer';
+    /** 回复内容类型，默认 text */
+    replyContentType?: 'md' | 'json' | 'text';
     cfg: any;
     channel: string;
     log?: any;

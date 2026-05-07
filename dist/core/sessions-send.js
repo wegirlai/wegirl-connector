@@ -139,7 +139,7 @@ function schemaToCompactPrompt(schema) {
  * 处理 Agent 回复的核心逻辑（在 deliver 回调中调用）
  */
 async function handleAgentReply(params) {
-    const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, log } = params;
+    const { payload, flowType, source, target, chatType, groupId, chatId, routingId, originalRoutingId, messageId, createdAt, originalMetadata, replyTo: explicitReplyTo, cfg, channel, taskId, stepId, agentCount, replyContentType, log } = params;
     const text = payload.text ?? '';
     const mediaUrls = resolveOutboundMediaUrls(payload);
     // 计算回复的 flowType（反向）
@@ -173,6 +173,7 @@ async function handleAgentReply(params) {
                     messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'response',
                     fromType: 'inner',
+                    replyContentType,
                     metadata: {
                         originalRoutingId,
                         mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
@@ -306,6 +307,7 @@ async function handleAgentReply(params) {
                         messageId: generateReplyMessageId(replyFlowType),
                         msgType: 'media',
                         fromType: 'inner',
+                        replyContentType,
                         metadata: {
                             replyStatus,
                             taskId,
@@ -331,6 +333,7 @@ async function handleAgentReply(params) {
                     messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'message',
                     fromType: 'inner',
+                    replyContentType,
                     metadata: {
                         replyStatus,
                         taskId,
@@ -381,6 +384,7 @@ async function handleAgentReply(params) {
                     messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'media',
                     fromType: 'inner',
+                    replyContentType,
                     metadata: {
                         inReplyTo: messageId,
                         status: 'completed',
@@ -405,6 +409,7 @@ async function handleAgentReply(params) {
                 messageId: generateReplyMessageId(replyFlowType),
                 msgType: 'message',
                 fromType: 'inner',
+                replyContentType,
                 metadata: {
                     inReplyTo: messageId,
                     status: 'completed',
@@ -423,15 +428,8 @@ async function handleAgentReply(params) {
             // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
             if (originalMetadata?.from === 'world') {
                 try {
-                    // 为 world stream 添加 expectJson 标记到 metadata
-                    const worldMessage = {
-                        ...replyMessage,
-                        metadata: {
-                            ...replyMessage.metadata,
-                            expectJson: !!originalMetadata?.responseSchema,
-                        }
-                    };
-                    await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(worldMessage));
+                    // replyMessage 已有 replyContentType，直接发送
+                    await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(replyMessage));
                     log?.info?.(`[handleAgentReply] from=world message also sent to wegirl:stream:world from ${target}`);
                 }
                 catch (streamErr) {
@@ -456,6 +454,7 @@ async function handleAgentReply(params) {
                     messageId: generateReplyMessageId(replyFlowType),
                     msgType: 'error',
                     fromType: 'inner',
+                    replyContentType,
                     metadata: {
                         inReplyTo: messageId,
                         status: 'failed',
@@ -483,10 +482,13 @@ export async function wegirlSessionsSend(options) {
  */
 async function processMessage(options) {
     const { message: originalMessage, cfg, channel, target, source, groupId, chatType, log, taskId, stepTotalAgents, stepId, routingId: originalRoutingId, msgType, metadata: originalMetadata, replyTo } = options;
-    // 处理 message，如果有 responseSchema 则注入 JSON_MODE prompt
+    // wegirl:forward 消息 replyContentType 固定为 text
+    const replyContentType = options.replyContentType || 'text';
+    // 处理 message，如果是 json 模式，则注入 JSON_MODE prompt
     let message = originalMessage;
-    if (originalMetadata?.responseSchema) {
-        const jsonPrompt = schemaToCompactPrompt(originalMetadata.responseSchema);
+    if (replyContentType === 'json') {
+        const schema = originalMetadata?.responseSchema || { message: "" };
+        const jsonPrompt = schemaToCompactPrompt(schema);
         message = `${jsonPrompt}\n\n${originalMessage}`;
     }
     const chatId = groupId || target;
@@ -544,6 +546,7 @@ async function processMessage(options) {
             routingId,
             messageId,
             fromType: options.fromType || 'inner',
+            replyContentType,
             metadata: {
                 ...originalMetadata,
                 matchedBy: route.matchedBy,
@@ -622,7 +625,7 @@ async function processMessage(options) {
         Metadata: {
             ...originalMetadata,
             responseSchema: originalMetadata?.responseSchema,
-            expectJson: !!originalMetadata?.responseSchema,
+            expectJson: replyContentType === 'json',
         },
         ...mediaPayload,
     });
@@ -657,6 +660,7 @@ async function processMessage(options) {
                         createdAt,
                         originalMetadata,
                         replyTo, // 显式传递 replyTo
+                        replyContentType,
                         cfg,
                         channel,
                         taskId,

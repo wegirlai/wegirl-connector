@@ -198,6 +198,7 @@ export interface MessageBuilderOptions {
   fromType?: string;
   metadata?: Record<string, any>;
   timeoutSeconds?: number;
+  replyContentType?: string;
 }
 
 /**
@@ -207,7 +208,7 @@ export function buildMessage(
   opts: MessageBuilderOptions,
   baseMetadata?: Record<string, any>
 ): any {
-  return {
+  const result: any = {
     flowType: opts.flowType,
     source: opts.source,
     target: opts.target,
@@ -226,4 +227,10 @@ export function buildMessage(
       processedAt: Date.now(),
     }
   };
+
+  if (opts.replyContentType !== undefined) {
+    result.replyContentType = opts.replyContentType;
+  }
+
+  return result;
 }
