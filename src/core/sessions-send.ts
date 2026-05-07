@@ -674,7 +674,7 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
       routingId,
       messageId,
       fromType: options.fromType || 'inner',
-      replyContentType,
+      replyContentType: 'text',
       metadata: {
         ...originalMetadata,
         matchedBy: route.matchedBy,

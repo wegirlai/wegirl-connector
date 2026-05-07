@@ -546,7 +546,7 @@ async function processMessage(options) {
             routingId,
             messageId,
             fromType: options.fromType || 'inner',
-            replyContentType,
+            replyContentType: 'text',
             metadata: {
                 ...originalMetadata,
                 matchedBy: route.matchedBy,
