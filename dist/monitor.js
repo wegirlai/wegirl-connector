@@ -91,7 +91,7 @@ export async function monitorWeGirlProvider(params) {
                         continue;
                     }
                     const msg = JSON.parse(messageData);
-                    log?.info?.(`[WeGirl:${accountId}] Received message ${id}: ${msg.flowType} from ${msg.source}`);
+                    log?.info?.(`[WeGirl:${accountId}] Received message ${id}: ${JSON.stringify(msg)}`);
                     // ⚠️ 关键：调用 wegirlSessionsSend，由它内部完成 act
                     // 使用 await 确保处理完成后再 ACK，实现 at-least-once 语义
                     try {
