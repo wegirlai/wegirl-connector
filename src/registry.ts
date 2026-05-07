@@ -287,6 +287,9 @@ export class Registry {
   }
 
   // 清理过期 Staff (仅针对 agent 类型)
+  // ⚠️ 注意：主要的心跳超时检测已迁移到 wegirl-service (Python 后端) 实现。
+  // 客户端 cleanup 仅作为辅助（如正常关闭时清理），不可靠，因为 connector
+  // 自身停止后无法执行此函数。
   async cleanupExpiredStaff(): Promise<string[]> {
     const offlineStaff: string[] = [];
     const now = Date.now();

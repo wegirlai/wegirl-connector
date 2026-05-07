@@ -533,7 +533,15 @@ async function handleAgentReply(params: {
       // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
       if (originalMetadata?.from === 'world') {
         try {
-          await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(replyMessage));
+          // 为 world stream 添加 expectJson 标记到 metadata
+          const worldMessage = {
+            ...replyMessage,
+            metadata: {
+              ...replyMessage.metadata,
+              expectJson: !!originalMetadata?.responseSchema,
+            }
+          };
+          await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(worldMessage));
           log?.info?.(`[handleAgentReply] from=world message also sent to wegirl:stream:world from ${target}`);
         } catch (streamErr: any) {
           log?.error?.(`[handleAgentReply] Failed to send to world stream: ${streamErr.message}`);
