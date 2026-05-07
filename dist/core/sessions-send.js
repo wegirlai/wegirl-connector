@@ -144,7 +144,7 @@ async function handleAgentReply(params) {
     const mediaUrls = resolveOutboundMediaUrls(payload);
     // 计算回复的 flowType（反向）
     const replyFlowType = reverseFlowType(flowType);
-    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, text=${text.substring(0, 50)}, mediaCount=${mediaUrls.length}, originalMessageId=${messageId}, replyFlowType=${replyFlowType}`);
+    log?.info?.(`[handleAgentReply] Processing reply: target=${target}, mediaCount=${mediaUrls.length}, originalMessageId=${messageId}, replyFlowType=${replyFlowType}`);
     // Agent 回复时生成新的 messageId
     // 格式: {flowType}_CNR_{instanceId}_{uuid}
     // CNR = wegirl-connector 回复
