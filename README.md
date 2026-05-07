@@ -24,7 +24,15 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.1.0 (2026-05-03) ⭐ Current
+### v1.1.1 (2026-05-07) ⭐ Current
+
+**world Stream expectJson 标记 + 心跳检测注释**:
+- ✅ world stream 回复消息自动携带 `expectJson` 标记，便于 world 端解析 JSON Schema 响应
+- ✅ 明确 `cleanupExpiredStaff` 仅作辅助清理，主心跳超时检测由 wegirl-service 后端负责
+
+详见 [MILESTONE-v1.1.1.md](./milestones/MILESTONE-v1.1.1.md)
+
+### v1.1.0 (2026-05-03)
 
 **移除硬编码模型配置**:
 - ✅ 删除 `sessions-send.ts` 中硬编码的 `Model: 'kimi-coding/k2p5'`
