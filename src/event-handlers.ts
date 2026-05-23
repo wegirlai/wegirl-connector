@@ -3,7 +3,6 @@
 
 import type { PluginContext, PluginConfig } from './types.js';
 import type Redis from 'ioredis';
-import type { Registry } from './registry.js';
 import { randomUUID } from 'crypto';
 
 interface EventHandlerContext {
@@ -11,7 +10,6 @@ interface EventHandlerContext {
   logger: any;
   pluginConfig?: PluginConfig;
   getRedisClient: () => Redis | null;
-  getRegistry: () => Registry | null;
   instanceId: string;
 }
 
@@ -29,7 +27,7 @@ export function resetEventHandlers(): void {
  * 注册所有 OpenClaw 事件处理器
  */
 export function registerEventHandlers(ctx: EventHandlerContext, force: boolean = false): void {
-  const { context, logger, pluginConfig, getRedisClient, getRegistry, instanceId } = ctx;
+  const { context, logger, pluginConfig, getRedisClient, instanceId } = ctx;
 
   // 防止重复注册（除非强制重新注册）
   if (handlersRegistered && !force) {

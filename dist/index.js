@@ -198,21 +198,16 @@ const plugin = {
                             const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
                             hasSyncedAgents = true;
                             logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
-                            // 注册到 Registry（只做初始注册，不启动定时心跳）
+                            // Registry 只负责心跳管理（syncAgentsFromLocal 已完成 Hash 注册）
                             registry = new Registry(redisClient, INSTANCE_ID, logger);
-                            // 一次性注册所有本地 agent（不启动定时心跳）
+                            // 为所有本地 agent 启动定时心跳（30s 间隔更新 lastHeartbeat）
                             const localAgents = await getLocalAgents(logger);
                             for (const agent of localAgents) {
                                 if (agent?.accountId) {
-                                    await registry.register({
-                                        staffId: agent.accountId,
-                                        name: agent.name || agent.accountId,
-                                        type: 'agent',
-                                        instanceId: INSTANCE_ID
-                                    });
+                                    registry.startHeartbeat(agent.accountId, INSTANCE_ID);
                                 }
                             }
-                            logger.info(`[WeGirl register] Agents registered: ${localAgents.length}`);
+                            logger.info(`[WeGirl register] Heartbeats started for ${localAgents.length} agents`);
                             // 发送插件注册成功事件到 wegirl:events
                             if (redisClient && redisClient.status === 'ready') {
                                 const eventData = {
@@ -642,7 +637,6 @@ const plugin = {
             logger,
             pluginConfig,
             getRedisClient: () => redisClient,
-            getRegistry: () => registry,
             instanceId: INSTANCE_ID
         });
         // HTTP 路由

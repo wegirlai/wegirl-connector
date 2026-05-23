@@ -1,12 +1,10 @@
 import type { PluginContext, PluginConfig } from './types.js';
 import type Redis from 'ioredis';
-import type { Registry } from './registry.js';
 interface EventHandlerContext {
     context: PluginContext;
     logger: any;
     pluginConfig?: PluginConfig;
     getRedisClient: () => Redis | null;
-    getRegistry: () => Registry | null;
     instanceId: string;
 }
 /**

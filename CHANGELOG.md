@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.3 — 移除 initRedis 中的重复注册循环
+
+**发布日期**: 2026-05-24
+
+### 🔄 变更
+
+- **移除 `registry.register()` 循环** — `syncAgentsFromLocal` 已直接 `redis.hset` 完成所有字段写入，initRedis 中的 `registry.register()` 循环是重复覆盖写
+- **`Registry` 改为纯心跳管理** — `startHeartbeat` 从 private 改为 public，initRedis 中遍历本地 agent 只启动定时心跳，不写 Hash
+- **清理 `event-handlers.ts` 残留** — `getRegistry` 参数和 `Registry` import 已无用，全部移除
+
+### 🛠 影响文件
+
+- `src/index.ts` — initRedis 中 `register()` → `startHeartbeat()`
+- `src/registry.ts` — `startHeartbeat` 改为 public
+- `src/event-handlers.ts` — 移除 `getRegistry` 参数和 `Registry` import
+
+---
+
 ## v1.3.2 — 移除事件驱动注册/注销
 
 **发布日期**: 2026-05-24

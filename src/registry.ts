@@ -122,7 +122,7 @@ export class Registry {
   }
 
   // 启动定时心跳
-  private startHeartbeat(staffId: string, instanceId: string): void {
+  startHeartbeat(staffId: string, instanceId: string): void {
     if (this.heartbeatTimers.has(staffId)) {
       clearInterval(this.heartbeatTimers.get(staffId)!);
     }

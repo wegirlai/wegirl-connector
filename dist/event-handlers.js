@@ -13,7 +13,7 @@ export function resetEventHandlers() {
  * 注册所有 OpenClaw 事件处理器
  */
 export function registerEventHandlers(ctx, force = false) {
-    const { context, logger, pluginConfig, getRedisClient, getRegistry, instanceId } = ctx;
+    const { context, logger, pluginConfig, getRedisClient, instanceId } = ctx;
     // 防止重复注册（除非强制重新注册）
     if (handlersRegistered && !force) {
         logger.debug('[WeGirl] Event handlers already registered, skipping');

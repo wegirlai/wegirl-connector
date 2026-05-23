@@ -15,7 +15,7 @@ export declare class Registry {
         activeTasks: number;
         pendingTasks: number;
     }): Promise<void>;
-    private startHeartbeat;
+    startHeartbeat(staffId: string, instanceId: string): void;
     unregisterStaff(staffId: string): Promise<void>;
     unregisterAgent(agentId: string): Promise<void>;
     getStaff(staffId: string): Promise<RegistryEntry | null>;
