@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.1 (2026-05-23) ⭐ Current
+### v1.3.2 (2026-05-24) ⭐ Current
+
+**移除事件驱动注册/注销**:
+- ✅ `before_agent_start` 去掉 `registerAgent` — 避免与 `syncAgentsFromLocal` 重复注册
+- ✅ `agent_end` 去掉 `unregisterAgent` — 避免 session 结束时误删静态 agent
+- ✅ 静态 agent 生命周期统一由 `syncAgentsFromLocal` + `registry.register()` 管理
+
+详见 [MILESTONE-v1.3.2.md](./milestones/MILESTONE-v1.3.2.md)
+
+### v1.3.1 (2026-05-23)
 
 **同步字段补全 + 双格式检测修复**:
 - ✅ `syncAgentsFromLocal` 新注册 agent 时补全 `maxConcurrent` 字段

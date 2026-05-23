@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.2 — 移除事件驱动注册/注销
+
+**发布日期**: 2026-05-24
+
+### 🔄 变更
+
+- **`before_agent_start` 去掉 `registerAgent`** — 静态 agent 的注册和心跳已由 `syncAgentsFromLocal` + initRedis 中的 `registry.register()` 完成，事件驱动注册造成重复
+- **`agent_end` 去掉 `unregisterAgent`** — 避免 session 结束时误删静态 agent 的 Redis staff，生命周期改由 `syncAgentsFromLocal` 管理
+- **动态 agent（`sessions_spawn`）** — 若无 wegirl binding，无需在 wegirl 中注册；有 binding 的已在 `syncAgentsFromLocal` 中覆盖
+
+### 🛠 影响文件
+
+- `src/event-handlers.ts`
+
+---
+
 ## v1.3.1 — 同步字段补全 + 双格式检测修复
 
 **发布日期**: 2026-05-23

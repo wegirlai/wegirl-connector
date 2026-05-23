@@ -22,36 +22,14 @@ export function registerEventHandlers(ctx, force = false) {
     handlersRegistered = true;
     const keyPrefix = pluginConfig?.keyPrefix || 'openclaw:events:';
     // Agent 启动时自动注册到 wegirl
+    // ⚠️ 已由 syncAgentsFromLocal + initRedis 中的 registry.register() 完成静态 agent 注册和心跳启动
+    // 动态 agent（sessions_spawn）若无 wegirl binding，无需在 wegirl 中注册
     context.on('before_agent_start', async (event) => {
-        const agentId = event?.agentId;
-        const registry = getRegistry();
-        if (agentId && registry) {
-            try {
-                await registry.registerAgent({
-                    agentId,
-                    name: agentId,
-                    capabilities: event.capabilities || ['general'],
-                    maxConcurrent: 3
-                }, {
-                    instanceId,
-                    version: '1.0'
-                });
-                logger.info(`[WeGirl:${instanceId}] Agent auto-registered: ${agentId}`);
-            }
-            catch (err) {
-                logger.error(`[WeGirl:${instanceId}] Agent registration failed:`, err.message);
-            }
-        }
         await persistEvent('before_agent_start', event, ctx);
     });
     // Agent 结束时注销
+    // ⚠️ 静态 agent 的 Redis staff 生命周期由 syncAgentsFromLocal 管理，不应在 session 结束时注销
     context.on('agent_end', async (event) => {
-        const agentId = event?.agentId;
-        const registry = getRegistry();
-        if (agentId && registry) {
-            await registry.unregisterAgent(agentId);
-            logger.info(`[WeGirl:${instanceId}] Agent unregistered: ${agentId}`);
-        }
         await persistEvent('agent_end', event, ctx);
     });
     // 子 Agent 启动中
