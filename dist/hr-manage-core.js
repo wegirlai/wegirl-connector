@@ -3,6 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { getGlobalConfig } from './config.js';
 // 获取 OpenClaw 配置路径
 function getOpenClawConfigPath() {
     if (process.env.OPENCLAW_CONFIG_PATH) {
@@ -15,7 +16,7 @@ function getOpenClawConfigPath() {
 function getOpenClawHome() {
     return process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
 }
-// 检查 agent 是否已存在（通过检查目录和 openclaw.json）
+// 检查 agent 是否已存在（通过检查目录和全局配置）
 function checkAgentExists(agentName) {
     const openclawHome = getOpenClawHome();
     // 检查 workspace 目录
@@ -28,22 +29,28 @@ function checkAgentExists(agentName) {
     if (fs.existsSync(agentPath)) {
         return true;
     }
-    // 检查 openclaw.json
+    // 从全局配置检查
     try {
-        const configPath = getOpenClawConfigPath();
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        const exists = config.agents?.list?.some((a) => a.id === agentName || a.name === agentName);
-        return exists || false;
+        const config = getGlobalConfig();
+        if (!config)
+            return false;
+        // openllm 格式: { agents: { kimi: {...} } }
+        if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+            return !!config.agents[agentName];
+        }
+        // openclaw 格式: { agents: { list: [...] } }
+        return config.agents?.list?.some((a) => a.id === agentName || a.name === agentName) || false;
     }
     catch {
         return false;
     }
 }
-// 检查 accountId 是否已被占用（在 openclaw.json 的 bindings 中）
+// 检查 accountId 是否已被占用（在全局配置的 bindings 中）
 function checkAccountIdInUse(accountId) {
     try {
-        const configPath = getOpenClawConfigPath();
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const config = getGlobalConfig();
+        if (!config)
+            return { inUse: false };
         const binding = config.bindings?.find((b) => b.match?.channel === 'wegirl' && b.match?.accountId === accountId);
         if (binding) {
             return { inUse: true, agentId: binding.agentId };
@@ -373,10 +380,10 @@ export async function executeCreateAgent(params, ctx) {
         // agent 子目录文件
         // auth.json 和 models.json 不再创建（根据要求）
         results.steps.push({ step: 2, name: 'create_files', status: 'success', message: 'Created AGENTS.md, BOOTSTRAP.md, IDENTITY.md, SOUL.md, TOOLS.md, USER.md' });
-        // Step 3: 更新 openclaw.json
-        ctx.logger.info(`[hr:create_agent] Step 3: Updating openclaw.json...`);
+        // Step 3: 更新配置
+        ctx.logger.info(`[hr:create_agent] Step 3: Updating config...`);
         const configPath = getOpenClawConfigPath();
-        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const config = getGlobalConfig() || {}; // 从内存读取，不读文件
         // 添加 agent 到 agents.list
         const agentEntry = {
             id: agentName,

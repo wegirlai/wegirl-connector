@@ -17,38 +17,17 @@
  *   timestamp: number
  * }
  */
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { getGlobalConfig } from './config.js';
 const KEY_PREFIX = 'wegirl:';
 /**
  * 检查 identifier 是否是 agent
+ * 优先查 Redis，再从全局配置查，不直接读文件
  */
 export async function checkIsAgent(identifier, redis, logger) {
     if (!identifier)
         return false;
     const checkId = identifier.toLowerCase();
-    // 1. 检查 openclaw.json
-    try {
-        const openclawHome = process.env.OPENCLAW_HOME || path.join(os.homedir(), '.openclaw');
-        const configPath = path.join(openclawHome, 'openclaw.json');
-        if (fs.existsSync(configPath)) {
-            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-            const agentsList = config.agents?.list || [];
-            for (const agent of agentsList) {
-                const agentName = (agent.name || '').toLowerCase();
-                const agentId = (agent.id || '').toLowerCase();
-                if (checkId === agentName || checkId === agentId) {
-                    logger.info(`[HR] Found agent in openclaw.json: ${identifier}`);
-                    return true;
-                }
-            }
-        }
-    }
-    catch (e) {
-        logger.debug(`[HR] Error reading openclaw.json: ${e.message}`);
-    }
-    // 2. 检查 Redis
+    // 1. 优先检查 Redis
     try {
         const staffData = await redis.hgetall(`${KEY_PREFIX}staff:${identifier}`);
         if (staffData && staffData.type === 'agent') {
@@ -58,6 +37,32 @@ export async function checkIsAgent(identifier, redis, logger) {
     }
     catch (e) {
         logger.debug(`[HR] Error checking Redis: ${e.message}`);
+    }
+    // 2. 从全局配置查
+    try {
+        const config = getGlobalConfig();
+        if (config) {
+            // openllm 格式: { agents: { kimi: {...} } }
+            if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+                if (Object.keys(config.agents).some(id => id.toLowerCase() === checkId)) {
+                    logger.info(`[HR] Found agent in global config (openllm): ${identifier}`);
+                    return true;
+                }
+            }
+            // openclaw 格式: { agents: { list: [...] } }
+            const agentsList = config.agents?.list || [];
+            for (const agent of agentsList) {
+                const agentName = (agent.name || '').toLowerCase();
+                const agentId = (agent.id || '').toLowerCase();
+                if (checkId === agentName || checkId === agentId) {
+                    logger.info(`[HR] Found agent in global config (openclaw): ${identifier}`);
+                    return true;
+                }
+            }
+        }
+    }
+    catch (e) {
+        logger.debug(`[HR] Error reading global config: ${e.message}`);
     }
     return false;
 }

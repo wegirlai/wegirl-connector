@@ -24,13 +24,25 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.1.1 (2026-05-07) ⭐ Current
+### v1.3.0 (2026-05-23) ⭐ Current
 
-**world Stream expectJson 标记 + 心跳检测注释**:
-- ✅ world stream 回复消息自动携带 `expectJson` 标记，便于 world 端解析 JSON Schema 响应
-- ✅ 明确 `cleanupExpiredStaff` 仅作辅助清理，主心跳超时检测由 wegirl-service 后端负责
+**全局配置兼容性升级 (openllm / openclaw 双格式)**:
+- ✅ 所有模块统一使用 `getGlobalConfig()`，不再直接读取 `openclaw.json`
+- ✅ 兼容 openllm 格式 `{agents: {kimi: {...}}}` 和 openclaw 格式 `{agents: {list: [...]}}`
+- ✅ `initGlobalConfig` 防重复加载，避免热重载时配置被覆盖
+- ✅ `checkIsAgent` 优先查 Redis，fallback 全局配置，零磁盘 I/O
+- ✅ `getLocalAgents` 自动识别双格式，避免误匹配
 
-详见 [MILESTONE-v1.1.1.md](./milestones/MILESTONE-v1.1.1.md)
+详见 [MILESTONE-v1.3.0.md](./milestones/MILESTONE-v1.3.0.md)
+
+### v1.2.0 (2026-05-08)
+
+**replyContentType 协议升级**:
+- ✅ 消息顶层新增 `replyContentType` 字段（`text` | `md` | `json`）
+- ✅ `buildMessage` 统一构造，JSON 模式自动注入 prompt
+- ✅ `wegirl-service` 配套数据库字段 `reply_content_type`
+
+详见 [MILESTONE-v1.2.0.md](./milestones/MILESTONE-v1.2.0.md)
 
 ### v1.1.0 (2026-05-03)
 

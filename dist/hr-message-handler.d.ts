@@ -33,6 +33,7 @@ export interface PrivateMessageContext {
 }
 /**
  * 检查 identifier 是否是 agent
+ * 优先查 Redis，再从全局配置查，不直接读文件
  */
 export declare function checkIsAgent(identifier: string, redis: Redis, logger: any): Promise<boolean>;
 /**

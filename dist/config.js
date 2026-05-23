@@ -27,7 +27,7 @@ export function initGlobalConfig(cfg) {
     if (cfg) {
         globalConfig = cfg;
     }
-    else {
+    else if (!globalConfig) {
         globalConfig = loadConfigFromFile();
     }
     configLoadTime = Date.now();

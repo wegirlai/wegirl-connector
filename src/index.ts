@@ -1299,14 +1299,18 @@ async function handleDeleteAgent(args: any, redis: Redis, logger: any): Promise<
 }
 
 /**
- * 从 openclaw.json 读取 instanceId
+ * 从全局配置读取 instanceId
  */
 function getInstanceIdFromConfig(logger?: any): string {
   try {
-    const configPath = getOpenClawConfigPath();
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const instanceId = config.plugins?.wegirl?.config?.instanceId || 'instance-local';
-    logger?.info?.(`[hr] Got instanceId from openclaw.json: ${instanceId}`);
+    const config = getGlobalConfig();
+    if (!config) {
+      return 'instance-local';
+    }
+    const instanceId = config.plugins?.entries?.wegirl?.config?.instanceId
+      || config.plugins?.wegirl?.config?.instanceId
+      || 'instance-local';
+    logger?.info?.(`[hr] Got instanceId from global config: ${instanceId}`);
     return instanceId;
   } catch (err: any) {
     logger?.error?.(`[hr] Failed to read instanceId from config: ${err.message}`);
@@ -1323,20 +1327,33 @@ interface SyncResult {
   registered?: number;
 }
 
-// 获取本地所有 wegirl agents（从 openclaw.json 的 bindings 读取 accountId）
+// 获取本地所有 wegirl agents（优先从全局配置读取，不直接读文件）
 async function getLocalAgents(logger: any): Promise<Array<{ name: string; accountId: string; agentId: string }>> {
   try {
-    const configPath = getOpenClawConfigPath();
-    logger.info(`[sync] Reading config from: ${configPath}`);
-
-    if (!fs.existsSync(configPath)) {
-      logger.warn(`[sync] Config file not found: ${configPath}`);
+    const config = getGlobalConfig();
+    if (!config) {
+      logger.warn('[sync] No global config available');
       return [];
     }
 
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    // openllm 格式: { agents: { kimi: {...} } }
+    // 排除 OpenClaw 格式 { agents: { list: [...] } } 的误匹配
+    if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+      const agentIds = Object.keys(config.agents);
+      // 如果 agents 只有 "list" 键且值是数组，说明是 OpenClaw 格式，不是 openllm 格式
+      if (agentIds.length === 1 && agentIds[0] === 'list' && Array.isArray(config.agents.list)) {
+        logger.info('[sync] Detected OpenClaw agents format (list), skipping openllm format path');
+      } else {
+        logger.info(`[sync] Found ${agentIds.length} agents from global config (openllm format)`);
+        return agentIds.map(id => ({
+          agentId: id,
+          accountId: id,
+          name: id,
+        }));
+      }
+    }
 
-    // 从 bindings 中提取 wegirl channel 的 agent 列表
+    // openclaw 格式: { bindings: [...], agents: { list: [...] } }
     const bindings = config.bindings || [];
     const wegirlBindings = bindings.filter(
       (b: any) => b.match?.channel === 'wegirl' && b.match?.accountId

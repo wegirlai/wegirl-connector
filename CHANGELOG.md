@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.3.0 — 全局配置兼容性升级 (openllm / openclaw 双格式)
+
+**发布日期**: 2026-05-23
+
+### ✨ 新增
+
+- **`getGlobalConfig()` 统一读取** — `src/index.ts`、`src/hr-manage-core.ts`、`src/hr-message-handler.ts` 全部改用 `getGlobalConfig()`，不再直接 `fs.readFileSync(openclaw.json)`
+- **openllm 格式兼容** — 支持 `{agents: {kimi: {...}}}`（openllm）和 `{agents: {list: [...]}}`（openclaw）两种配置格式
+- **`initGlobalConfig` 防重复加载** — `else` → `else if (!globalConfig)`，避免插件热重载时配置被覆盖
+
+### 🔄 变更
+
+- **`checkIsAgent` 查询顺序优化** — 优先查 Redis `wegirl:staff:{id}`，fallback 到全局配置，彻底脱离文件 I/O
+- **`checkAgentExists` / `checkAccountIdInUse` 重构** — 从内存配置对象读取，支持两种 agents 结构
+- **`getLocalAgents` 双格式解析** — 自动识别 openllm（Object keys）vs openclaw（`agents.list` 数组），避免误匹配
+- **`getInstanceIdFromConfig` 路径扩展** — 同时支持 `config.plugins.entries.wegirl.config.instanceId` 和旧路径
+
+### 🛠 影响范围
+
+- `src/config.ts` — 防重复加载
+- `src/hr-manage-core.ts` — create_agent 配置写入逻辑
+- `src/hr-message-handler.ts` — 私聊/群聊 agent 身份校验
+- `src/index.ts` — sync agents、instanceId 获取、list_staffs
+
+---
+
 ## v1.2.0 — replyContentType 协议升级
 
 **发布日期**: 2026-05-08
