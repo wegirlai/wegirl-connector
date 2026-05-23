@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.3.5 — 实例级别心跳
+
+**发布日期**: 2026-05-24
+
+### ✨ 新增
+
+- **`wegirl:instance:{id}:heartbeat` 实例心跳** — `syncAgentsFromLocal` 最后统一设置实例级别心跳，替代逐个 agent 的 `lastHeartbeat`
+
+### 🔄 变更
+
+- **`syncAgentsFromLocal` 去掉 agent 级别 `lastHeartbeat`** — `toKeep` 分支不再更新 `lastHeartbeat`，新注册 agent 也不再写入 `lastHeartbeat`
+- **心跳改为实例级别** — 一个实例的心跳代表该实例下所有 agent 的存活状态
+
+### 🛠 配套
+
+- `wegirl-service` `_heartbeat_check_loop` 改为检查实例心跳，实例超时则批量标记该实例下所有 agent 为 offline
+
+### 🛠 影响文件
+
+- `src/index.ts` — `syncAgentsFromLocal` 去掉 agent `lastHeartbeat`，增加实例心跳
+- `wegirl-service/src/wegirl_service/service.py` — `_heartbeat_check_loop` 改为实例级别检测
+
+---
+
 ## v1.3.4 — 移除 Registry 定时心跳
 
 **发布日期**: 2026-05-24

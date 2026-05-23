@@ -1254,9 +1254,8 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         const existsLocally = localAgents?.some(a => a?.accountId === accountId) || false;
         if (existsLocally) {
             toKeep.push(accountId);
-            // 更新心跳 + 补全缺失字段
+            // 补全缺失字段（实例心跳由实例级 key 维护）
             const updates = {
-                lastHeartbeat: Date.now().toString(),
                 status: 'online'
             };
             if (staffData.maxConcurrent === undefined || staffData.maxConcurrent === '') {
@@ -1291,7 +1290,6 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
             capabilities: agentCapabilities.join(','),
             maxConcurrent: '3',
             status: 'online',
-            lastHeartbeat: Date.now().toString(),
             'load:activeTasks': '0',
             'load:pendingTasks': '0'
         });
@@ -1310,6 +1308,8 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         await cleanupAgentFromRedis(accountId, instanceId, redis, logger);
     }
     logger.info(`[sync] Sync complete: ${toKeep.length} kept, ${toRegister.length} registered, ${toRemove.length} zombies removed`);
+    // 设置实例级别心跳（替代逐个 agent 心跳）
+    await redis.set(`${KEY_PREFIX}instance:${instanceId}:heartbeat`, Date.now().toString());
     return {
         kept: toKeep.length,
         removed: toRemove.length,
