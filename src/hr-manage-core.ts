@@ -82,10 +82,15 @@ function checkAgentExists(agentName: string): boolean {
     if (!config) return false;
     
     // openllm 格式: { agents: { kimi: {...} } }
-    if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+    // openclaw 格式: { agents: { list: [...] } }
+    // 判断方式：如果 agents.list 是数组 → openclaw；否则如果 agents 是纯对象 → openllm
+    const isOpenclawFormat = Array.isArray(config.agents?.list);
+    const isOpenllmFormat = config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents) && !isOpenclawFormat;
+
+    if (isOpenllmFormat) {
       return !!config.agents[agentName];
     }
-    // openclaw 格式: { agents: { list: [...] } }
+    // openclaw 格式
     return config.agents?.list?.some(
       (a: any) => a.id === agentName || a.name === agentName
     ) || false;

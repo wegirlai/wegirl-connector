@@ -1337,20 +1337,19 @@ async function getLocalAgents(logger: any): Promise<Array<{ name: string; accoun
     }
 
     // openllm 格式: { agents: { kimi: {...} } }
-    // 排除 OpenClaw 格式 { agents: { list: [...] } } 的误匹配
-    if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+    // openclaw 格式: { agents: { list: [...] } }
+    // 判断方式：如果 agents.list 是数组 → openclaw；否则如果 agents 是纯对象 → openllm
+    const isOpenclawFormat = Array.isArray(config.agents?.list);
+    const isOpenllmFormat = config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents) && !isOpenclawFormat;
+
+    if (isOpenllmFormat) {
       const agentIds = Object.keys(config.agents);
-      // 如果 agents 只有 "list" 键且值是数组，说明是 OpenClaw 格式，不是 openllm 格式
-      if (agentIds.length === 1 && agentIds[0] === 'list' && Array.isArray(config.agents.list)) {
-        logger.info('[sync] Detected OpenClaw agents format (list), skipping openllm format path');
-      } else {
-        logger.info(`[sync] Found ${agentIds.length} agents from global config (openllm format)`);
-        return agentIds.map(id => ({
-          agentId: id,
-          accountId: id,
-          name: id,
-        }));
-      }
+      logger.info(`[sync] Found ${agentIds.length} agents from global config (openllm format)`);
+      return agentIds.map(id => ({
+        agentId: id,
+        accountId: id,
+        name: id,
+      }));
     }
 
     // openclaw 格式: { bindings: [...], agents: { list: [...] } }
@@ -1459,11 +1458,15 @@ async function syncAgentsFromLocal(
 
     if (existsLocally) {
       toKeep.push(accountId);
-      // 更新心跳
-      await redis.hset(`${KEY_PREFIX}staff:${accountId}`, {
+      // 更新心跳 + 补全缺失字段
+      const updates: Record<string, string> = {
         lastHeartbeat: Date.now().toString(),
         status: 'online'
-      });
+      };
+      if (staffData.maxConcurrent === undefined || staffData.maxConcurrent === '') {
+        updates.maxConcurrent = '3';
+      }
+      await redis.hset(`${KEY_PREFIX}staff:${accountId}`, updates);
     } else {
       // 僵尸 agent：本地已不存在，需要清理
       toRemove.push(accountId);
@@ -1491,6 +1494,7 @@ async function syncAgentsFromLocal(
       role: '-',
       name: agentName,
       capabilities: agentCapabilities.join(','),
+      maxConcurrent: '3',
       status: 'online',
       lastHeartbeat: Date.now().toString(),
       'load:activeTasks': '0',

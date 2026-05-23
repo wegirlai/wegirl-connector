@@ -70,7 +70,12 @@ export async function checkIsAgent(
     const config = getGlobalConfig();
     if (config) {
       // openllm 格式: { agents: { kimi: {...} } }
-      if (config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents)) {
+      // openclaw 格式: { agents: { list: [...] } }
+      // 判断方式：如果 agents.list 是数组 → openclaw；否则如果 agents 是纯对象 → openllm
+      const isOpenclawFormat = Array.isArray(config.agents?.list);
+      const isOpenllmFormat = config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents) && !isOpenclawFormat;
+
+      if (isOpenllmFormat) {
         if (Object.keys(config.agents).some(id => id.toLowerCase() === checkId)) {
           logger.info(`[HR] Found agent in global config (openllm): ${identifier}`);
           return true;

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.1 — 同步字段补全 + 双格式检测修复
+
+**发布日期**: 2026-05-23
+
+### 🐛 修复
+
+- **`syncAgentsFromLocal` 字段缺失** — 新注册 agent 时缺少 `maxConcurrent` 字段，导致 Registry 反序列化后 `maxConcurrent` 为 `undefined`
+- **`toKeep` 分支字段补全** — 已存在 agent 更新心跳时，若缺少 `maxConcurrent` 自动补全为 `'3'`
+- **双格式检测误匹配** — `getLocalAgents` / `checkIsAgent` / `checkAgentExists` 中 `agentIds.length === 1` 判断不充分，当 `agents` 同时包含 `defaults` 和 `list` 时误将 `defaults` / `list` 当作 agent id 同步到 Redis
+
+### 🛠 影响文件
+
+- `src/index.ts` — `getLocalAgents` 双格式判断 + `syncAgentsFromLocal` 字段补全
+- `src/hr-message-handler.ts` — `checkIsAgent` 双格式判断
+- `src/hr-manage-core.ts` — `checkAgentExists` 双格式判断
+
+---
+
 ## v1.3.0 — 全局配置兼容性升级 (openllm / openclaw 双格式)
 
 **发布日期**: 2026-05-23

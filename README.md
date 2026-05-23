@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.0 (2026-05-23) ⭐ Current
+### v1.3.1 (2026-05-23) ⭐ Current
+
+**同步字段补全 + 双格式检测修复**:
+- ✅ `syncAgentsFromLocal` 新注册 agent 时补全 `maxConcurrent` 字段
+- ✅ `toKeep` 心跳更新时自动补全缺失的 `maxConcurrent`
+- ✅ 修复双格式检测误匹配：`agents` 含 `defaults` + `list` 时不再将 `defaults`/`list` 当作 agent id
+
+详见 [MILESTONE-v1.3.1.md](./milestones/MILESTONE-v1.3.1.md)
+
+### v1.3.0 (2026-05-23)
 
 **全局配置兼容性升级 (openllm / openclaw 双格式)**:
 - ✅ 所有模块统一使用 `getGlobalConfig()`，不再直接读取 `openclaw.json`
