@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.3 (2026-05-24) ⭐ Current
+### v1.3.4 (2026-05-24) ⭐ Current
+
+**移除 Registry 定时心跳**:
+- ✅ `Registry.heartbeat()` / `startHeartbeat()` / `heartbeatTimers` 全部移除
+- ✅ initRedis 中不再启动定时心跳循环
+- ✅ `Registry` 退化为纯查询/管理工具（保留注册、查询、索引管理）
+- ✅ `syncAgentsFromLocal` 初始设置 `lastHeartbeat` 后，agent 在线状态由消息流转证明
+
+详见 [MILESTONE-v1.3.4.md](./milestones/MILESTONE-v1.3.4.md)
+
+### v1.3.3 (2026-05-24)
 
 **移除 initRedis 中的重复注册循环**:
 - ✅ `syncAgentsFromLocal` 已完成 `redis.hset`，`registry.register()` 循环是重复写 Hash，移除

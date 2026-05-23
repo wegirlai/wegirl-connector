@@ -233,20 +233,13 @@ const plugin = {
               hasSyncedAgents = true;
               logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
 
-              // Registry 只负责心跳管理（syncAgentsFromLocal 已完成 Hash 注册）
+              // Registry 不再管理心跳（syncAgentsFromLocal 已完成初始注册）
+              // wegirl-service 通过消息流转判断 agent 在线状态
               registry = new Registry(redisClient, INSTANCE_ID, logger);
-
-              // 为所有本地 agent 启动定时心跳（30s 间隔更新 lastHeartbeat）
-              const localAgents = await getLocalAgents(logger);
-              for (const agent of localAgents) {
-                if (agent?.accountId) {
-                  registry!.startHeartbeat(agent.accountId, INSTANCE_ID);
-                }
-              }
-              logger.info(`[WeGirl register] Heartbeats started for ${localAgents.length} agents`);
 
               // 发送插件注册成功事件到 wegirl:events
               if (redisClient && redisClient.status === 'ready') {
+                const localAgents = await getLocalAgents(logger);
                 const eventData = {
                   id: randomUUID(),
                   type: 'plugin_registered',

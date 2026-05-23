@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.4 — 移除 Registry 定时心跳
+
+**发布日期**: 2026-05-24
+
+### 🔄 变更
+
+- **移除 `Registry` 定时心跳** — `heartbeat()`/`startHeartbeat()`/`heartbeatTimers` 全部移除
+- **移除 `HEARTBEAT_INTERVAL` 常量** — 不再使用
+- **`Registry` 退化为纯查询/管理工具** — 保留 `registerStaff`/`getStaff`/`findStaffByCapability` 等查询和注册方法，但不再维护定时心跳
+- **initRedis 中不再启动心跳** — `syncAgentsFromLocal` 初始设置 `lastHeartbeat` 后，由 `wegirl-service` 通过消息流转判断在线状态
+
+### 🛠 影响文件
+
+- `src/registry.ts` — 移除心跳相关方法和定时器
+- `src/index.ts` — 移除 initRedis 中的 `startHeartbeat()` 循环
+
+---
+
 ## v1.3.3 — 移除 initRedis 中的重复注册循环
 
 **发布日期**: 2026-05-24

@@ -4,18 +4,12 @@ export declare class Registry {
     private redis;
     private instanceId;
     private logger;
-    private heartbeatTimers;
     constructor(redis: Redis, instanceId: string, logger: any);
     private key;
     registerStaff(staffInfo: StaffInfo, instanceInfo: InstanceInfo): Promise<void>;
     registerAgent(agentInfo: any, instanceInfo: InstanceInfo): Promise<void>;
     registerHuman(humanInfo: any): Promise<void>;
     register(staffInfo: StaffInfo): Promise<void>;
-    heartbeat(staffId: string, load?: {
-        activeTasks: number;
-        pendingTasks: number;
-    }): Promise<void>;
-    startHeartbeat(staffId: string, instanceId: string): void;
     unregisterStaff(staffId: string): Promise<void>;
     unregisterAgent(agentId: string): Promise<void>;
     getStaff(staffId: string): Promise<RegistryEntry | null>;

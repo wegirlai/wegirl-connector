@@ -8,14 +8,12 @@ import type {
 } from './protocol.js';
 
 const KEY_PREFIX = 'wegirl:';
-const HEARTBEAT_INTERVAL = 30000; // 30秒
 const HEARTBEAT_TIMEOUT = 90000;  // 90秒
 
 export class Registry {
   private redis: Redis;
   private instanceId: string;
   private logger: any;
-  private heartbeatTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(redis: Redis, instanceId: string, logger: any) {
     this.redis = redis;
@@ -65,11 +63,6 @@ export class Registry {
     await pipeline.exec();
     
     this.logger.info(`[Registry] Staff registered: ${staffInfo.staffId} (${staffInfo.type}) @${instanceInfo.instanceId}`);
-    
-    // 只有 agent 启动心跳
-    if (staffInfo.type === 'agent') {
-      this.startHeartbeat(staffInfo.staffId, instanceInfo.instanceId);
-    }
   }
 
   // 向后兼容: 注册 Agent
@@ -104,48 +97,8 @@ export class Registry {
     await this.registerStaff(staffInfo, { instanceId: this.instanceId, version: '1.0' });
   }
 
-  // 发送心跳
-  async heartbeat(staffId: string, load?: { activeTasks: number; pendingTasks: number }): Promise<void> {
-    const key = this.key('staff', staffId);
-    
-    const updates: any = {
-      lastHeartbeat: Date.now().toString(),
-      status: 'online',
-    };
-    
-    if (load) {
-      updates['load:activeTasks'] = load.activeTasks.toString();
-      updates['load:pendingTasks'] = load.pendingTasks.toString();
-    }
-    
-    await this.redis.hset(key, updates);
-  }
-
-  // 启动定时心跳
-  startHeartbeat(staffId: string, instanceId: string): void {
-    if (this.heartbeatTimers.has(staffId)) {
-      clearInterval(this.heartbeatTimers.get(staffId)!);
-    }
-
-    const timer = setInterval(async () => {
-      try {
-        await this.heartbeat(staffId);
-      } catch (err: any) {
-        this.logger.error(`[Registry] Heartbeat failed for ${staffId}:`, err.message);
-      }
-    }, HEARTBEAT_INTERVAL);
-
-    this.heartbeatTimers.set(staffId, timer);
-  }
-
   // 注销 Staff
   async unregisterStaff(staffId: string): Promise<void> {
-    // 停止心跳
-    if (this.heartbeatTimers.has(staffId)) {
-      clearInterval(this.heartbeatTimers.get(staffId)!);
-      this.heartbeatTimers.delete(staffId);
-    }
-
     // 获取 Staff 信息
     const staffData = await this.redis.hgetall(this.key('staff', staffId));
     if (!staffData || Object.keys(staffData).length === 0) {
@@ -382,10 +335,6 @@ export class Registry {
 
   // 销毁
   destroy(): void {
-    for (const [staffId, timer] of this.heartbeatTimers) {
-      clearInterval(timer);
-      this.logger.info(`[Registry] Stopped heartbeat for ${staffId}`);
-    }
-    this.heartbeatTimers.clear();
+    // 清理资源
   }
 }
