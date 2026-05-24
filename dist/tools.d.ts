@@ -20,7 +20,6 @@ export declare class WeGirlTools {
     private parseTarget;
     send(params: WeGirlSendParams): Promise<any>;
     private publishRoutingEvent;
-    register(params: any): Promise<any>;
     query(params: any): Promise<any>;
     private buildAddress;
     private deliverToAgent;

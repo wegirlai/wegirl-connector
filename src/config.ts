@@ -22,27 +22,9 @@ function loadConfigFromFile(): any {
 }
 
 /**
- * 初始化全局配置
- * 在插件启动时调用一次
- */
-export function initGlobalConfig(cfg?: any): void {
-  if (cfg) {
-    globalConfig = cfg;
-  } else if (!globalConfig) {
-    globalConfig = loadConfigFromFile();
-  }
-  configLoadTime = Date.now();
-  console.log('[WeGirl Config] Global config initialized');
-}
-
-/**
  * 获取全局配置
- * 如果未初始化，会自动加载
  */
 export function getGlobalConfig(): any {
-  if (!globalConfig) {
-    initGlobalConfig();
-  }
   return globalConfig;
 }
 

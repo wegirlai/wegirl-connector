@@ -5,14 +5,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
-import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, getRagApiConfig } from './config.js';
+import { getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, getRagApiConfig } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = join(__dirname, '..', 'package.json');
 let PLUGIN_VERSION = 'unknown';
@@ -97,10 +96,11 @@ function hasAccount(staffId) {
 let redisClient = null;
 let redisConnectPromise = null;
 let hasSyncedAgents = false; // 确保 syncAgentsFromLocal 只执行一次
-let registry = null;
+let isSyncing = false; // 同步锁，防止竞态条件重复执行
 let pendingQueue = null;
 //let messageRouter: MessageRouter | null = null;
 let wegirlTools = null;
+let heartbeatTimer = null;
 // 全局单例控制 - 确保只有一个 Stream 消费者
 let globalConsumerStarted = false;
 let globalStreamClient = null;
@@ -117,8 +117,9 @@ const plugin = {
             setGlobalConfig(ctxCfg);
             logger.info('[WeGirl register] Global config set from context.cfg');
         }
-        // 初始化全局配置（从文件加载，如果上面没有设置）
-        initGlobalConfig();
+        else {
+            logger.warn('[WeGirl register] No context.cfg provided, global config not set');
+        }
         // 使用全局配置
         const fullConfig = getGlobalConfig();
         const pluginConfig = getWeGirlPluginConfig();
@@ -193,24 +194,21 @@ const plugin = {
                     //await messageRouter.startListening();
                     //logger.info('[WeGirl register] Cross-instance message listener started');
                     // 同步 agents：清理 Redis 中不存在于本地的僵尸 agent（只执行一次）
-                    if (!hasSyncedAgents) {
+                    if (!hasSyncedAgents && !isSyncing) {
+                        isSyncing = true;
                         try {
                             const syncResult = await syncAgentsFromLocal(INSTANCE_ID, redisClient, logger);
                             hasSyncedAgents = true;
-                            logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
-                            // Registry 不再管理心跳（syncAgentsFromLocal 已完成初始注册）
-                            // wegirl-service 通过消息流转判断 agent 在线状态
-                            registry = new Registry(redisClient, INSTANCE_ID, logger);
+                            logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.registered} registered, ${syncResult.removed} zombies removed`);
                             // 发送插件注册成功事件到 wegirl:events
                             if (redisClient && redisClient.status === 'ready') {
-                                const localAgents = await getLocalAgents(logger);
                                 const eventData = {
                                     id: randomUUID(),
                                     type: 'plugin_registered',
                                     timestamp: Date.now().toString(),
                                     payload: JSON.stringify({
                                         instanceId: INSTANCE_ID,
-                                        agentsRegistered: localAgents.length,
+                                        agentsRegistered: syncResult.kept,
                                         redisStatus: redisClient.status,
                                         version: PLUGIN_VERSION,
                                         timestamp: new Date().toISOString()
@@ -237,14 +235,31 @@ const plugin = {
                                 };
                                 await redisClient.publish('wegirl:init', JSON.stringify(initData));
                                 logger.info('[WeGirl register] Init message sent to wegirl:init');
+                                // 启动实例级定时心跳（每 30 秒刷新 TTL 90 秒）
+                                if (!heartbeatTimer) {
+                                    heartbeatTimer = setInterval(() => {
+                                        redisClient.set(`wegirl:heartbeat:${INSTANCE_ID}`, Date.now().toString(), 'EX', 90).catch((err) => {
+                                            logger.error('[Heartbeat] Failed to refresh instance heartbeat:', err.message);
+                                        });
+                                    }, 30000);
+                                    logger.info('[WeGirl register] Instance heartbeat timer started (30s interval, 90s TTL)');
+                                }
                             }
                         }
                         catch (syncErr) {
                             logger.error('[WeGirl register] Agent sync failed:', syncErr.message);
                         }
+                        finally {
+                            isSyncing = false;
+                        }
                     }
                     else {
-                        logger.debug('[WeGirl register] Agent sync already done, skipping');
+                        if (isSyncing) {
+                            logger.debug('[WeGirl register] Agent sync in progress, skipping');
+                        }
+                        else {
+                            logger.debug('[WeGirl register] Agent sync already done, skipping');
+                        }
                     }
                 }
             })();
@@ -1168,24 +1183,10 @@ async function getLocalAgents(logger) {
             logger.warn('[sync] No global config available');
             return [];
         }
-        // openllm 格式: { agents: { kimi: {...} } }
-        // openclaw 格式: { agents: { list: [...] } }
-        // 判断方式：如果 agents.list 是数组 → openclaw；否则如果 agents 是纯对象 → openllm
-        const isOpenclawFormat = Array.isArray(config.agents?.list);
-        const isOpenllmFormat = config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents) && !isOpenclawFormat;
-        if (isOpenllmFormat) {
-            const agentIds = Object.keys(config.agents);
-            logger.info(`[sync] Found ${agentIds.length} agents from global config (openllm format)`);
-            return agentIds.map(id => ({
-                agentId: id,
-                accountId: id,
-                name: id,
-            }));
-        }
-        // openclaw 格式: { bindings: [...], agents: { list: [...] } }
+        // 统一格式: { bindings: [...], agents: { list: [...] } }
+        // openllm 和 openclaw 均使用此格式，无需判断类型
         const bindings = config.bindings || [];
         const wegirlBindings = bindings.filter((b) => b.match?.channel === 'wegirl' && b.match?.accountId);
-        // 从 agents.list 中获取 name 映射
         const agents = config.agents?.list || [];
         const agentMap = new Map();
         for (const a of agents) {
@@ -1308,8 +1309,10 @@ async function syncAgentsFromLocal(instanceId, redis, logger) {
         await cleanupAgentFromRedis(accountId, instanceId, redis, logger);
     }
     logger.info(`[sync] Sync complete: ${toKeep.length} kept, ${toRegister.length} registered, ${toRemove.length} zombies removed`);
-    // 设置实例级别心跳（替代逐个 agent 心跳）
-    await redis.set(`${KEY_PREFIX}instance:${instanceId}:heartbeat`, Date.now().toString());
+    // 设置实例级别心跳（带 TTL，90 秒过期）
+    // wegirl-service 通过 EXISTS wegirl:heartbeat:{instanceId} 判断实例存活状态
+    // key 过期自动消失 = 实例挂了
+    await redis.set(`${KEY_PREFIX}heartbeat:${instanceId}`, Date.now().toString(), 'EX', 90);
     return {
         kept: toKeep.length,
         removed: toRemove.length,

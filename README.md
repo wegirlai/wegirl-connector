@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.6 (2026-05-24) ⭐ Current
+### v1.3.7 (2026-05-24) ⭐ Current
+
+**竞态条件修复 + 编译加载**:
+- ✅ 修复 `initRedis` 被连续调用两次导致 `syncAgentsFromLocal` 重复执行的问题
+- ✅ 添加 `isSyncing` 同步锁防止竞态条件
+- ✅ 明确 OpenClaw 加载的是 `dist/` 编译后的 JS，修改 `.ts` 后必须 `npx tsc` 编译
+- ✅ 移除 `initGlobalConfig`，配置统一由 `setGlobalConfig` 从 `context.cfg` 传入
+- ✅ `getLocalAgents` 移除 openllm/openclaw 格式判断，统一使用 `bindings + agents.list`
+
+详见 [MILESTONE-v1.3.7.md](./milestones/MILESTONE-v1.3.7.md)
+
+### v1.3.6 (2026-05-24)
 
 **心跳 key 简化 + 注册逻辑清理**:
 - ✅ `wegirl:instance:{id}:heartbeat` + `wegirl:instance:{id}` → 合并为单一 `wegirl:heartbeat:{instanceId}` (TTL 90s)

@@ -42,24 +42,13 @@ export async function checkIsAgent(identifier, redis, logger) {
     try {
         const config = getGlobalConfig();
         if (config) {
-            // openllm 格式: { agents: { kimi: {...} } }
-            // openclaw 格式: { agents: { list: [...] } }
-            // 判断方式：如果 agents.list 是数组 → openclaw；否则如果 agents 是纯对象 → openllm
-            const isOpenclawFormat = Array.isArray(config.agents?.list);
-            const isOpenllmFormat = config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents) && !isOpenclawFormat;
-            if (isOpenllmFormat) {
-                if (Object.keys(config.agents).some(id => id.toLowerCase() === checkId)) {
-                    logger.info(`[HR] Found agent in global config (openllm): ${identifier}`);
-                    return true;
-                }
-            }
-            // openclaw 格式: { agents: { list: [...] } }
+            // 统一格式: { agents: { list: [...] } }
             const agentsList = config.agents?.list || [];
             for (const agent of agentsList) {
                 const agentName = (agent.name || '').toLowerCase();
                 const agentId = (agent.id || '').toLowerCase();
                 if (checkId === agentName || checkId === agentId) {
-                    logger.info(`[HR] Found agent in global config (openclaw): ${identifier}`);
+                    logger.info(`[HR] Found agent in global config: ${identifier}`);
                     return true;
                 }
             }

@@ -243,54 +243,34 @@ export class WeGirlTools {
             this.logger.warn(`[WeGirlTools] Failed to publish routing event: ${err.message}`);
         }
     }
-    // wegirl_register 工具
-    async register(params) {
-        const { agentId, name, capabilities, maxConcurrent } = params;
-        const agentData = {
-            agentId,
-            name: name || agentId,
-            instanceId: this.instanceId,
-            status: 'online',
-            capabilities: Array.isArray(capabilities) ? capabilities.join(',') : capabilities,
-            maxConcurrent: maxConcurrent || 3,
-            lastHeartbeat: Date.now()
-        };
-        await this.redis.hset(`${KEY_PREFIX}agents:${agentId}`, agentData);
-        if (capabilities) {
-            const caps = Array.isArray(capabilities) ? capabilities : capabilities.split(',');
-            for (const cap of caps) {
-                if (cap.trim()) {
-                    await this.redis.sadd(`${KEY_PREFIX}capability:${cap}`, agentId);
-                }
-            }
-        }
-        this.logger.info(`[WeGirlTools] Agent registered: ${agentId}`);
-        return { success: true, agentId, instanceId: this.instanceId };
-    }
-    // wegirl_query 工具
+    // wegirl_query 工具（统一使用 staff: key）
     async query(params) {
         const { type, capability, agentId } = params;
         if (type === 'agents') {
-            const keys = await this.redis.keys(`${KEY_PREFIX}agents:*`);
-            const agents = await Promise.all(keys.map(async (key) => {
+            const keys = await this.redis.keys(`${KEY_PREFIX}staff:*`);
+            const staffKeys = keys.filter(k => {
+                const parts = k.split(':');
+                return parts.length === 3 && !k.includes(':by-type:') && !k.includes(':capability:');
+            });
+            const agents = await Promise.all(staffKeys.map(async (key) => {
                 const data = await this.redis.hgetall(key);
                 return {
-                    agentId: data.agentId,
+                    agentId: data.staffId,
                     name: data.name,
                     status: data.status,
                     capabilities: data.capabilities?.split(',') || []
                 };
             }));
-            return { agents: agents.filter(a => a.agentId) };
+            return { agents: agents.filter(a => a.agentId && a.agentId !== 'human') };
         }
         if (type === 'capability' && capability) {
             const agentIds = await this.redis.smembers(`${KEY_PREFIX}capability:${capability}`);
             return { capability, agents: agentIds };
         }
         if (type === 'agent' && agentId) {
-            const data = await this.redis.hgetall(`${KEY_PREFIX}agents:${agentId}`);
+            const data = await this.redis.hgetall(`${KEY_PREFIX}staff:${agentId}`);
             return {
-                agent: data.agentId ? {
+                agent: data.staffId ? {
                     ...data,
                     capabilities: data.capabilities?.split(',') || []
                 } : null
@@ -470,10 +450,15 @@ export class WeGirlTools {
     }
     async broadcast(envelope, params, routingId) {
         await this.publishRoutingEvent(routingId, 'broadcast_started', {});
-        const keys = await this.redis.keys(`${KEY_PREFIX}agents:*`);
+        // 统一使用 staff: key 查询所有 agent
+        const keys = await this.redis.keys(`${KEY_PREFIX}staff:*`);
+        const staffKeys = keys.filter(k => {
+            const parts = k.split(':');
+            return parts.length === 3 && !k.includes(':by-type:') && !k.includes(':capability:');
+        });
         const results = [];
-        await this.publishRoutingEvent(routingId, 'broadcast_agents_found', { agentCount: keys.length });
-        for (const key of keys) {
+        await this.publishRoutingEvent(routingId, 'broadcast_agents_found', { agentCount: staffKeys.length });
+        for (const key of staffKeys) {
             const agentId = key.split(':').pop();
             if (agentId) {
                 try {
@@ -485,7 +470,7 @@ export class WeGirlTools {
                 }
             }
         }
-        await this.publishRoutingEvent(routingId, 'broadcast_completed', { targetCount: keys.length, successCount: results.filter(r => r.success).length });
+        await this.publishRoutingEvent(routingId, 'broadcast_completed', { targetCount: staffKeys.length, successCount: results.filter(r => r.success).length });
         return { success: true, broadcast: true, targets: results.length, results, routingId };
     }
     /**

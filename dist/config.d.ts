@@ -1,11 +1,5 @@
 /**
- * 初始化全局配置
- * 在插件启动时调用一次
- */
-export declare function initGlobalConfig(cfg?: any): void;
-/**
  * 获取全局配置
- * 如果未初始化，会自动加载
  */
 export declare function getGlobalConfig(): any;
 /**
