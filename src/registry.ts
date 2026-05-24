@@ -1,4 +1,4 @@
-// src/registry.ts - Staff 注册与心跳管理 (统一 agents/humans)
+// src/registry.ts - Staff 注册与心跳管理（仅保留查询和注销，注册统一由 syncAgentsFromLocal 完成）
 
 import type Redis from 'ioredis';
 import type { 
@@ -8,7 +8,6 @@ import type {
 } from './protocol.js';
 
 const KEY_PREFIX = 'wegirl:';
-const HEARTBEAT_TIMEOUT = 90000;  // 90秒
 
 export class Registry {
   private redis: Redis;
@@ -26,121 +25,7 @@ export class Registry {
     return `${KEY_PREFIX}${parts.join(':')}`;
   }
 
-  // 注册 Staff (统一 agent/human)
-  async registerStaff(staffInfo: StaffInfo, instanceInfo: InstanceInfo): Promise<void> {
-    const entry: RegistryEntry = {
-      staffId: staffInfo.staffId,
-      type: staffInfo.type, // 'agent' | 'human'
-      instanceId: instanceInfo.instanceId,
-      name: staffInfo.name,
-      capabilities: staffInfo.capabilities || [],
-      maxConcurrent: staffInfo.maxConcurrent || 3,
-      status: 'online',
-      lastHeartbeat: Date.now(),
-      metadata: staffInfo.metadata || {},
-      load: {
-        activeTasks: 0,
-        pendingTasks: 0
-      }
-    };
-
-    const pipeline = this.redis.pipeline();
-    
-    // 保存 Staff 信息 (统一 key: wegirl:staff:{id})
-    pipeline.hset(this.key('staff', staffInfo.staffId), this.flattenObject(entry));
-    
-    // 添加到实例的 Staff 集合
-    pipeline.sadd(this.key('instance', instanceInfo.instanceId, 'staff'), staffInfo.staffId);
-    
-    // 添加到类型索引
-    pipeline.sadd(this.key('staff', 'by-type', staffInfo.type), staffInfo.staffId);
-    
-    // 添加到能力索引 (统一)
-    for (const cap of staffInfo.capabilities || []) {
-      pipeline.sadd(this.key('capability', cap), staffInfo.staffId);
-    }
-    
-    await pipeline.exec();
-    
-    this.logger.info(`[Registry] Staff registered: ${staffInfo.staffId} (${staffInfo.type}) @${instanceInfo.instanceId}`);
-  }
-
-  // 向后兼容: 注册 Agent
-  async registerAgent(agentInfo: any, instanceInfo: InstanceInfo): Promise<void> {
-    await this.registerStaff({
-      staffId: agentInfo.agentId,
-      type: 'agent',
-      name: agentInfo.name,
-      capabilities: agentInfo.capabilities,
-      maxConcurrent: agentInfo.maxConcurrent,
-      metadata: agentInfo.metadata
-    }, instanceInfo);
-  }
-
-  // 向后兼容: 注册 Human
-  async registerHuman(humanInfo: any): Promise<void> {
-    await this.registerStaff({
-      staffId: humanInfo.userId,
-      type: 'human',
-      name: humanInfo.name,
-      capabilities: humanInfo.capabilities,
-      metadata: {
-        departments: humanInfo.departments,
-        skills: humanInfo.skills,
-        availability: humanInfo.availability
-      }
-    }, { instanceId: this.instanceId, version: '1.0' });
-  }
-
-  // 简化的 register 方法
-  async register(staffInfo: StaffInfo): Promise<void> {
-    await this.registerStaff(staffInfo, { instanceId: this.instanceId, version: '1.0' });
-  }
-
-  // 注销 Staff
-  async unregisterStaff(staffId: string): Promise<void> {
-    // 获取 Staff 信息
-    const staffData = await this.redis.hgetall(this.key('staff', staffId));
-    if (!staffData || Object.keys(staffData).length === 0) {
-      return;
-    }
-
-    const capabilitiesStr = staffData.capabilities || '';
-    const capabilities = capabilitiesStr ? capabilitiesStr.split(',') : [];
-    const instanceId = staffData.instanceId;
-    const type = staffData.type;
-
-    const pipeline = this.redis.pipeline();
-    
-    // 删除 Staff 信息
-    pipeline.del(this.key('staff', staffId));
-    
-    // 从实例集合移除
-    if (instanceId) {
-      pipeline.srem(this.key('instance', instanceId, 'staff'), staffId);
-    }
-    
-    // 从类型索引移除
-    if (type) {
-      pipeline.srem(this.key('staff', 'by-type', type), staffId);
-    }
-    
-    // 从能力索引移除
-    for (const cap of capabilities) {
-      if (cap) {
-        pipeline.srem(this.key('capability', cap), staffId);
-      }
-    }
-    
-    await pipeline.exec();
-    
-    this.logger.info(`[Registry] Staff unregistered: ${staffId}`);
-  }
-
-  // 向后兼容: 注销 Agent
-  async unregisterAgent(agentId: string): Promise<void> {
-    await this.unregisterStaff(agentId);
-  }
+  // ===== 查询方法（保留）=====
 
   // 查询 Staff 信息
   async getStaff(staffId: string): Promise<RegistryEntry | null> {
@@ -239,41 +124,59 @@ export class Registry {
     return staff;
   }
 
-  // 清理过期 Staff (仅针对 agent 类型)
-  // ⚠️ 注意：主要的心跳超时检测已迁移到 wegirl-service (Python 后端) 实现。
-  // 客户端 cleanup 仅作为辅助（如正常关闭时清理），不可靠，因为 connector
-  // 自身停止后无法执行此函数。
-  async cleanupExpiredStaff(): Promise<string[]> {
-    const offlineStaff: string[] = [];
-    const now = Date.now();
+  // ===== 注销方法（保留，用于 syncAgentsFromLocal 清理僵尸 agent）=====
 
-    // 扫描所有 Staff
-    const pattern = this.key('staff', '*');
-    const keys = await this.redis.keys(pattern);
-
-    for (const key of keys) {
-      const staffId = key.split(':').pop();
-      if (!staffId) continue;
-
-      const s = await this.getStaff(staffId);
-      if (!s) continue;
-      
-      // 只处理 agent 类型
-      if (s.type !== 'agent') continue;
-
-      // 检查是否过期
-      if (now - s.lastHeartbeat > HEARTBEAT_TIMEOUT && s.status === 'online') {
-        await this.redis.hset(key, {
-          status: 'offline',
-          lastHeartbeat: now.toString()
-        });
-        offlineStaff.push(staffId);
-        this.logger.warn(`[Registry] Agent marked offline: ${staffId}`);
-      }
+  // 注销 Staff
+  async unregisterStaff(staffId: string): Promise<void> {
+    // 获取 Staff 信息
+    const staffData = await this.redis.hgetall(this.key('staff', staffId));
+    if (!staffData || Object.keys(staffData).length === 0) {
+      return;
     }
 
-    return offlineStaff;
+    const capabilitiesStr = staffData.capabilities || '';
+    const capabilities = capabilitiesStr ? capabilitiesStr.split(',') : [];
+    const instanceId = staffData.instanceId;
+    const type = staffData.type;
+
+    const pipeline = this.redis.pipeline();
+    
+    // 删除 Staff 信息
+    pipeline.del(this.key('staff', staffId));
+    
+    // 从实例集合移除
+    if (instanceId) {
+      pipeline.srem(this.key('instance', instanceId, 'staff'), staffId);
+    }
+    
+    // 从类型索引移除
+    if (type) {
+      pipeline.srem(this.key('staff', 'by-type', type), staffId);
+    }
+    
+    // 从能力索引移除
+    for (const cap of capabilities) {
+      if (cap) {
+        pipeline.srem(this.key('capability', cap), staffId);
+      }
+    }
+    
+    await pipeline.exec();
+    
+    this.logger.info(`[Registry] Staff unregistered: ${staffId}`);
   }
+
+  // 向后兼容: 注销 Agent
+  async unregisterAgent(agentId: string): Promise<void> {
+    await this.unregisterStaff(agentId);
+  }
+
+  // 销毁
+  destroy(): void {
+    // 清理资源
+  }
+
+  // ===== 工具方法 =====
 
   // 扁平化对象
   private flattenObject(obj: any, prefix = ''): Record<string, string> {
@@ -331,10 +234,5 @@ export class Registry {
     }
     
     return result;
-  }
-
-  // 销毁
-  destroy(): void {
-    // 清理资源
   }
 }

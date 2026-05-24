@@ -24,7 +24,16 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.5 (2026-05-24) ⭐ Current
+### v1.3.6 (2026-05-24) ⭐ Current
+
+**心跳 key 简化 + 注册逻辑清理**:
+- ✅ `wegirl:instance:{id}:heartbeat` + `wegirl:instance:{id}` → 合并为单一 `wegirl:heartbeat:{instanceId}` (TTL 90s)
+- ✅ `wegirl-service` 心跳检测改为 `EXISTS` 检查，不存在则批量标记该实例下所有 agent offline
+- ✅ 清理 `Registry` 注册方法、`WeGirlTools.register()`、`cleanupExpiredStaff`，注册统一由 `syncAgentsFromLocal` 完成
+
+详见 [MILESTONE-v1.3.6.md](./milestones/MILESTONE-v1.3.6.md)
+
+### v1.3.5 (2026-05-24)
 
 **实例级别心跳**:
 - ✅ `syncAgentsFromLocal` 设置 `wegirl:instance:{id}:heartbeat` 实例心跳，替代逐个 agent 的 `lastHeartbeat`

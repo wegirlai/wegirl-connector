@@ -38,9 +38,9 @@ export function registerEventHandlers(ctx: EventHandlerContext, force: boolean =
   
   const keyPrefix = pluginConfig?.keyPrefix || 'openclaw:events:';
 
-  // Agent 启动时自动注册到 wegirl
-  // ⚠️ 已由 syncAgentsFromLocal + initRedis 中的 registry.register() 完成静态 agent 注册和心跳启动
-  // 动态 agent（sessions_spawn）若无 wegirl binding，无需在 wegirl 中注册
+  // Agent 启动事件监听
+  // ⚠️ 所有 agent 注册统一由 syncAgentsFromLocal 完成，不在此处单独注册
+  // syncAgentsFromLocal 同时处理：清理僵尸 agent、注册新 agent、维护实例级心跳
   context.on('before_agent_start', async (event: any) => {
     await persistEvent('before_agent_start', event, ctx);
   });

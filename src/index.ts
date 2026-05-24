@@ -5,14 +5,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { wegirlPlugin } from './channel.js';
 import { setWeGirlRuntime, setWeGirlConfig } from './runtime.js';
-import { Registry } from './registry.js';
 import { PendingQueue } from './queue.js';
 import { WeGirlTools } from './tools.js';
 import { registerEventHandlers, resetEventHandlers } from './event-handlers.js';
 import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler.js';
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
-import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, loadOpenClawConfig, getRagApiConfig } from './config.js';
+import { initGlobalConfig, getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, getRagApiConfig } from './config.js';
 import type {
   PluginContext
 } from './types.js';
@@ -107,7 +106,6 @@ function hasAccount(staffId: string): boolean {
 let redisClient: Redis | null = null;
 let redisConnectPromise: Promise<void> | null = null;
 let hasSyncedAgents = false;  // 确保 syncAgentsFromLocal 只执行一次
-let registry: Registry | null = null;
 let pendingQueue: PendingQueue | null = null;
 //let messageRouter: MessageRouter | null = null;
 let wegirlTools: WeGirlTools | null = null;
@@ -231,11 +229,7 @@ const plugin = {
                 logger
               );
               hasSyncedAgents = true;
-              logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.removed} zombies removed`);
-
-              // Registry 不再管理心跳（syncAgentsFromLocal 已完成初始注册）
-              // wegirl-service 通过消息流转判断 agent 在线状态
-              registry = new Registry(redisClient, INSTANCE_ID, logger);
+              logger.info(`[WeGirl register] Agent sync completed: ${syncResult.kept} kept, ${syncResult.registered} registered, ${syncResult.removed} zombies removed`);
 
               // 发送插件注册成功事件到 wegirl:events
               if (redisClient && redisClient.status === 'ready') {
@@ -1507,8 +1501,15 @@ async function syncAgentsFromLocal(
 
   logger.info(`[sync] Sync complete: ${toKeep.length} kept, ${toRegister.length} registered, ${toRemove.length} zombies removed`);
 
-  // 设置实例级别心跳（替代逐个 agent 心跳）
-  await redis.set(`${KEY_PREFIX}instance:${instanceId}:heartbeat`, Date.now().toString());
+  // 设置实例级别心跳（带 TTL，90 秒过期）
+  // wegirl-service 通过 EXISTS wegirl:heartbeat:{instanceId} 判断实例存活状态
+  // key 过期自动消失 = 实例挂了
+  await redis.set(
+    `${KEY_PREFIX}heartbeat:${instanceId}`,
+    Date.now().toString(),
+    'EX',
+    90
+  );
 
   return {
     kept: toKeep.length,
