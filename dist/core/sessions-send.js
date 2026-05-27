@@ -425,11 +425,11 @@ async function handleAgentReply(params) {
             }
             console.log(`[handleAgentReply]`, JSON.stringify(replyMessage, null, 2));
             await pub.publish('wegirl:replies', JSON.stringify(replyMessage));
-            // from=world 的消息额外发送到 Redis Stream，保证可靠投递给 world
+            // from=world 的消息额外发送到 Redis Stream，flowType 简化为首字母
             if (originalMetadata?.from === 'world') {
                 try {
-                    // replyMessage 已有 replyContentType，直接发送
-                    await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(replyMessage));
+                    const worldMessage = { ...replyMessage, flowType: replyFlowType.charAt(0), message: { code: 200, data: text } };
+                    await pub.xadd('wegirl:stream:world', '*', 'data', JSON.stringify(worldMessage));
                     log?.info?.(`[handleAgentReply] from=world message also sent to wegirl:stream:world from ${target}`);
                 }
                 catch (streamErr) {

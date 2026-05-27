@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.7 (2026-05-24) ⭐ Current
+### v1.3.8 (2025-07-08) ⭐ Current
+
+**`wegirl:stream:world` flowType 精简**:
+- ✅ `replyFlowType` 完整字符串（如 `A2H`）→ 改为首字母（如 `A`）
+- ✅ 仅影响写入 `wegirl:stream:world` 的 `replyMessage`
+- ✅ `messageId` 生成格式保持原样
+- ✅ 目的：减少消息体积，下游消费者快速判断流向类型
+
+详见 [MILESTONE-v1.3.8.md](./milestones/MILESTONE-v1.3.8.md)
+
+### v1.3.7 (2026-05-24)
 
 **竞态条件修复 + 编译加载**:
 - ✅ 修复 `initRedis` 被连续调用两次导致 `syncAgentsFromLocal` 重复执行的问题
