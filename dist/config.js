@@ -79,6 +79,28 @@ export function getInstanceId() {
     const pluginCfg = getWeGirlPluginConfig();
     return pluginCfg?.instanceId || 'instance-local';
 }
+/**
+ * 获取 account 的 batchConsumers 配置
+ * 配置位置：channels.wegirl.accounts.{accountId}.batchConsumers
+ */
+export function getAccountBatchConsumers(cfg, accountId) {
+    const channelAccounts = cfg?.channels?.wegirl?.accounts || {};
+    const account = channelAccounts[accountId];
+    const count = account?.batchConsumers || 1;
+    return Math.max(1, Math.min(count, 10)); // 限制 1-10
+}
+/**
+ * 获取 Agent 的 sessions 目录路径
+ * 从 cfg.agents.{agentId}.agentDir 推导，兼容 macOS/Linux
+ */
+export function getAgentSessionsDir(cfg, agentId) {
+    const agentDir = cfg?.agents?.[agentId]?.agentDir;
+    if (agentDir) {
+        return agentDir.replace(/\/agent$/, '/sessions');
+    }
+    const root = process.env.HOME || '/root';
+    return `${root}/.openclaw/agents/${agentId}/sessions`;
+}
 // 兼容旧接口：loadOpenClawConfig
 export function loadOpenClawConfig() {
     return getGlobalConfig();

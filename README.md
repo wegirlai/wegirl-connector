@@ -24,7 +24,17 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.3.8 (2025-07-08) ⭐ Current
+### v1.4.0 (2026-06-04) ⭐ Current
+
+**自动清理 Worker + 并行消费架构**:
+- ✅ Task Session 自动清理：dispatch 后 10 分钟自动删除 `.jsonl` 文件
+- ✅ 多 Consumer 并行消费：支持 `batchConsumers` 配置，提升吞吐量
+- ✅ 自动生成 `taskId` + Session 隔离：避免多 consumer 下消息 collapse 串扰
+- ✅ 按 `instanceId` 隔离清理队列，多实例不互相干扰
+
+详见 [MILESTONE-v1.4.0.md](./milestones/MILESTONE-v1.4.0.md)
+
+### v1.3.8 (2025-07-08)
 
 **`wegirl:stream:world` flowType 精简**:
 - ✅ `replyFlowType` 完整字符串（如 `A2H`）→ 改为首字母（如 `A`）

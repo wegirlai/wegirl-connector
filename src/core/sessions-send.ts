@@ -1,11 +1,12 @@
 // src/core/sessions-send.ts - 发送消息到 Agent (V1 核心层)
 
 import Redis from 'ioredis';
-import { getWeGirlPluginConfig } from "../config.js";
+import { getWeGirlPluginConfig, getAccountBatchConsumers } from "../config.js";
 import { getWeGirlRuntime } from "../runtime.js";
 import { buildMessage } from './utils.js';
 import type { OutboundReplyPayload } from "openclaw/plugin-sdk";
 import { createReplyPrefixOptions, resolveOutboundMediaUrls } from "openclaw/plugin-sdk";
+import { randomUUID } from "crypto";
 
 // 消息去重缓存：最近发送的消息 ID
 const sentMessageIds = new Set<string>();
@@ -619,7 +620,17 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
   const messageId = incomingMessageId || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
   const createdAt = Date.now();
 
-  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${taskId ? `, taskId=${taskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}${replyTo ? `, replyTo=${replyTo}` : ''}`);
+  // 读取 account 的 batchConsumers 配置
+  const consumerCount = getAccountBatchConsumers(cfg, target);
+
+  // consumerCount > 1 且没有显式 taskId → 自动生成，避免多 consumer 下 session 冲突
+  let effectiveTaskId = taskId;
+  if (!effectiveTaskId && consumerCount > 1) {
+    effectiveTaskId = `auto:${randomUUID()}`;
+    log?.info?.(`[WeGirl SessionsSend] Auto-generated taskId for multi-consumer account: ${effectiveTaskId}`);
+  }
+
+  log?.info?.(`[WeGirl SessionsSend] Called: channel=${channel}, source=${source}, target=${target}, chatId=${chatId}, chatType=${chatType}${effectiveTaskId ? `, taskId=${effectiveTaskId}` : ''}${originalRoutingId ? `, originalRoutingId=${originalRoutingId}` : ''}${replyTo ? `, replyTo=${replyTo}` : ''}`);
 
   // ========== 1. 获取 PluginRuntime ==========
   const runtime = getWeGirlRuntime();
@@ -635,11 +646,20 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
   }
 
   // ========== 2. resolveAgentRoute ==========
+  // 根据 chatType 构建 peer，确保不同对话上下文有独立的 session key
+  const peerKind = chatType === 'group' ? 'group' : 'direct';
+  const peerId = chatType === 'group' ? (groupId || chatId) : source;
   const route = runtime.channel.routing.resolveAgentRoute({
     cfg,
     channel,
     accountId: target,
+    peer: { kind: peerKind, id: peerId },
   });
+
+  // taskId 隔离：生成独立的 task-scoped sessionKey，绕过 direct 模式的 collapse
+  if (effectiveTaskId) {
+    route.sessionKey = `agent:${route.agentId}:task:${effectiveTaskId}`;
+  }
 
   if (!route?.agentId) {
     log?.error?.(`[WeGirl SessionsSend] Failed to resolve agent route: channel=${channel}, target=${target}`);
@@ -818,6 +838,25 @@ async function processMessage(options: SessionsSendOptions): Promise<void> {
     });
 
     log?.info?.(`${logPrefix} Dispatch complete`);
+
+    // === 清理入队：task session 延迟删除 ===
+    if (effectiveTaskId) {
+      try {
+        const instanceId = cfg?.id || 'instance-local';
+        const cleanupAt = Date.now() + 10 * 60 * 1000; // 至少保留10分钟
+        const cleanupRedis = await getRedisPublisher(cfg);
+        if (cleanupRedis) {
+          await cleanupRedis.zadd(
+            `wegirl:cleanup:sessions:${instanceId}`,
+            cleanupAt,
+            `${route.sessionKey}|${route.agentId}`
+          );
+          log?.info?.(`${logPrefix} Scheduled cleanup in 10min: ${route.sessionKey}`);
+        }
+      } catch (cleanupErr: any) {
+        log?.warn?.(`${logPrefix} Failed to schedule cleanup:`, cleanupErr.message);
+      }
+    }
   } catch (err: any) {
     log?.error?.(`${logPrefix} Dispatch failed: ${err.message}`);
     throw err;
