@@ -24,7 +24,18 @@ Redis Stream ←→ WeGirl Connector ←→ OpenClaw Agents
 
 ## 📌 里程碑
 
-### v1.4.0 (2026-06-04) ⭐ Current
+### v1.5.0 (2025-07-11) ⭐ Current
+
+**Skill Install 工具 - 从 Dashboard 同步 Agent 技能**:
+- ✅ 新增 `skill_install` 工具：通过 Dashboard 接口同步 Agent 技能到本地
+- ✅ 远程有本地无 → 自动下载；本地有远程无 → 自动删除
+- ✅ 支持 `force_update` 参数强制覆盖已有文件
+- ✅ 新增 `src/skill-install.ts` 核心模块：获取列表、下载文件、目录对比、结果格式化
+- ✅ 依赖 Dashboard 后端接口：`GET /api/agents/{id}/skills` + `GET /api/skills/{id}/download?path=xxx`
+
+详见 [MILESTONE-v1.5.0.md](./milestones/MILESTONE-v1.5.0.md)
+
+### v1.4.0 (2026-06-04)
 
 **自动清理 Worker + 并行消费架构**:
 - ✅ Task Session 自动清理：dispatch 后 10 分钟自动删除 `.jsonl` 文件

@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.5.0 — Skill Install 工具
+
+**发布日期**: 2025-07-11
+
+### ✨ 新增
+
+- **`skill_install` 工具** — 同步安装 Agent 技能：通过 Dashboard 后端接口获取技能列表，与本地 `skills/` 目录比较，自动下载缺失文件、删除多余文件
+- **`src/skill-install.ts` 核心模块** — 包含 `fetchRemoteSkills`、`downloadSkillFile`、`syncSkill`、`installSkills`、`formatSyncResult` 等方法
+- **`force_update` 参数支持** — 可选强制覆盖已存在的文件
+
+### 🔄 变更
+
+- **`src/index.ts`** — 注册 `skill_install` 工具，导入 `skill-install.ts` 模块
+
+### 🛠 配套
+
+- **Dashboard 后端新增接口**:
+  - `GET /api/server/agents/{agent_id}/skills` — 获取 Agent 已安装技能列表（含文件路径）
+  - `GET /api/server/skills/{skill_id}/download?path={file_path}` — 下载技能文件内容
+- **环境变量**: `DASHBOARD_API_URL`（可覆盖默认地址）、`OPENCLAW_HOME`（配置工作目录）
+
+### 🛠 影响文件
+
+- `src/skill-install.ts` — 新增（302 行）
+- `src/index.ts` — 新增 Tool 注册（+37 行）
+
+---
+
 ## v1.3.5 — 实例级别心跳
 
 **发布日期**: 2026-05-24

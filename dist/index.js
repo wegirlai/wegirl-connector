@@ -12,6 +12,7 @@ import { handleMentionMessage, handlePrivateMessage } from './hr-message-handler
 import { wegirlSend } from './core/index.js';
 import { wegirlSessionsSend } from './core/sessions-send.js';
 import { getGlobalConfig, getWeGirlPluginConfig, setGlobalConfig, getRagApiConfig } from './config.js';
+import { installSkills, formatSyncResult } from './skill-install.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = join(__dirname, '..', 'package.json');
 let PLUGIN_VERSION = 'unknown';
@@ -631,7 +632,46 @@ const plugin = {
                     }
                 }
             });
-            logger.info('[WeGirl register] Tools registered: wegirl_send, hr, rag');
+            // Skill Install Tool - 技能同步安装
+            context.registerTool({
+                name: 'skill_install',
+                description: '同步安装 Agent 技能：从 Dashboard 后端获取技能列表，与本地 skills 目录比较，本地多了就删除，少了就下载。安装流程：1) GET /api/agents/{id}/skills 获取技能列表和文件路径；2) 循环 GET /api/skills/{id}/download?path=xxx 逐个下载文件。',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        agent_id: {
+                            type: 'string',
+                            description: 'Agent ID（必填）。例如: dashboarddev, connectordev, scout 等。'
+                        },
+                        force_update: {
+                            type: 'boolean',
+                            description: '是否强制更新已存在的文件（默认 false，只下载缺失的文件）',
+                            default: false
+                        }
+                    },
+                    required: ['agent_id']
+                },
+                execute: async (_toolCallId, params) => {
+                    const { agent_id, force_update } = params;
+                    logger.info(`[skill_install] 调用: agent_id=${agent_id}, force_update=${force_update || false}`);
+                    try {
+                        const result = await installSkills(agent_id, { forceUpdate: force_update, logger });
+                        const formattedText = formatSyncResult(result);
+                        return {
+                            content: [{ type: "text", text: formattedText }],
+                            details: result
+                        };
+                    }
+                    catch (err) {
+                        logger.error(`[skill_install] 失败:`, err.message);
+                        return {
+                            content: [{ type: "text", text: `技能同步失败: ${err.message}` }],
+                            details: { success: false, error: err.message }
+                        };
+                    }
+                }
+            });
+            logger.info('[WeGirl register] Tools registered: wegirl_send, hr, rag, skill_install');
         }
         else {
             logger.warn('[WeGirl register] registerTool not available');
